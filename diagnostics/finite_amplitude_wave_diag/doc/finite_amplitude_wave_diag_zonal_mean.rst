@@ -27,14 +27,23 @@ Last update: 03/12/2024
 
 Description
 -----------
-For a comprehensive review of the finite-amplitude Rossby wave theory, please read Nakamura (2024).
+For a comprehensive review of the finite-amplitude Rossby wave activity (FAWA) theory, please refer to the review article Nakamura (2024).
 
-Traditional Rossby wave eddy-mean flow theory decomposes physical fields into zonal mean :math:`\overline{(...)}` and eddy :math:`(...)^\prime`. At mid-latitude, with the presumption that quasi-geostrophic (QG) approximation is valid, denote QG potential vorticity (QGPV) by :math:`q`. To the extent which the wave amplitude :math:`\alpha` is small, under conservative dynamics, the (linear) wave activity, which is a measure of wave amplitude itself, :math:`A_L \equiv \frac{1}{2} \frac{{q^\prime}^2}{\partial \bar{q}/\partial y}` obeys the Eliassen-Palm (E-P) flux relation :math:`\frac{\partial}{\partial t} A_L + \frac{1}{\rho_0} \nabla \cdot \boldsymbol{F} = \mathcal{O}(\alpha^3)`.
+This POD computes the seasonal climatologies of various finite-amplitude wave diagnostics. Each of the diagnostics captures different aspects of eddy-mean interactions.
 
-When the eddy amplitude :math:`\alpha` is large, the observed zonal-mean state is modified by the eddy effects. To establish a conservation relation for finite-amplitude eddies, Nakamura and collaborators define an eddy-free "reference state" for QGPV :math:`Q_{\text{ref}}` and zonal wind :math:`u_{\text{ref}}` respectively. They represent a hypothetical flow completely devoid of eddies, which, when stirred adiabatically, would evolve into the observed state. The finite-amplitude wave activity (FAWA) defined with respect to :math:`Q_{\text{ref}}` satistfies the
 
-This POD includes seasonal climatologies of various finite-amplitude wave diagnostic which captures different aspects of eddy-mean interactions:
 
+
+
+Physical assumptions made in FAWA framework
+--------------------------------------------
+
+
+
+
+
+Preprocessing of Climate Model Output
+-------------------------------------
 
 
 
