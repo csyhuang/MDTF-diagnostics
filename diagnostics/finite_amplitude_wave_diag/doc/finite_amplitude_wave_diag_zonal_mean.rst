@@ -23,25 +23,24 @@ Clare S. Y. Huang\ |^1|, Christopher Polster |^2| and Noboru Nakamura\ |^1|
 
 .. rst-class:: center
 
-Last update: 05/06/2024
+Last update: 03/12/2024
 
 Description
 -----------
-Large-scale circulation of the atmosphere in the Earth’s extratropics is dominated by eddies, eastward (westerly) zonal winds, and their interaction. Eddies not only bring about weather variabilities but also help maintain the average state of climate. Although Linear Rossby Wave theory for the zonal-mean zonal circulation and its response to eddy forcing was fully developed, the corresponding theory for eddy and its role in redistributing angular momentum and heat was mostly linear and thus limited to small-amplitude eddy. This limits its application to meteorological data where finite-amplitude eddies exist.
+For a comprehensive review of the finite-amplitude Rossby wave theory, please read Nakamura (2024).
 
-The Finite-amplitude Rossby wave theory developed by Noboru Nakamura and collaborators have formulated new dynamical constraints on finite-amplitude eddies and the related eddy-free reference state. 
+Traditional Rossby wave eddy-mean flow theory decomposes physical fields into zonal mean :math:`\overline{(...)}` and eddy :math:`(...)^\prime`. At mid-latitude, with the presumption that quasi-geostrophic (QG) approximation is valid, denote QG potential vorticity (QGPV) by :math:`q`. To the extent which the wave amplitude :math:`\alpha` is small, under conservative dynamics, the (linear) wave activity, which is a measure of wave amplitude itself, :math:`A_L \equiv \frac{1}{2} \frac{{q^\prime}^2}{\partial \bar{q}/\partial y}` obeys the Eliassen-Palm (E-P) flux relation :math:`\frac{\partial}{\partial t} A_L + \frac{1}{\rho_0} \nabla \cdot \boldsymbol{F} = \mathcal{O}(\alpha^3)`.
+
+When the eddy amplitude :math:`\alpha` is large, the observed zonal-mean state is modified by the eddy effects. To establish a conservation relation for finite-amplitude eddies, Nakamura and collaborators define an eddy-free "reference state" for QGPV :math:`Q_{\text{ref}}` and zonal wind :math:`u_{\text{ref}}` respectively. They represent a hypothetical flow completely devoid of eddies, which, when stirred adiabatically, would evolve into the observed state. The finite-amplitude wave activity (FAWA) defined with respect to :math:`Q_{\text{ref}}` satistfies the
+
+This POD includes seasonal climatologies of various finite-amplitude wave diagnostic which captures different aspects of eddy-mean interactions:
 
 
 
-In recent years, our understanding of how large-
-scale eddies and mean flows interact in the extratropical atmosphere has
-advanced significantly due to  This article reviews the
-theoretical foundations for finite-amplitude Rossby wave activity and re-
-lated concepts. Theory is then applied to atmospheric data to elucidate how
-angular momentum is redistributed by the generation, transmission, and
-dissipation of Rossby waves and to reveal how an anomalously large wave
-event such as atmospheric blocking may arise from regional eddy-mean flow
-interaction.
+
+
+
+inline :math:`\frac{ \sum_{t=0}^{N}f(t,k) }{N}`
 
 .. Underline with '-'s to make a second-level heading.
 
@@ -83,7 +82,36 @@ Required model output variables
 References
 ----------
 
-(to be filled in)
+.. _ref-Nakamura-annual-review:
+
+10241. Nakamura, N. (2024). Large-Scale Eddy-Mean Flow Interaction in the Earth's Extratropical Atmosphere. *Annual Review of Fluid Mechanics*, **56**, 349-377,
+`doi:10.1146/annurev-fluid-121021-035602 <https://doi.org/10.1146/annurev-fluid-121021-035602>`__.
+
+.. _ref-Neal-et-al-GRL:
+
+10242. Neal, E., Huang, C. S., & Nakamura, N. (2022). The 2021 Pacific Northwest heat wave and associated blocking: meteorology and the role of an upstream cyclone as a diabatic source of wave activity. *Geophysical Research Letters*, **49(8)**, e2021GL097699. `doi:10.1029/2021GL097699 <https://doi.org/10.1029/2021GL097699>`__.
+
+.. _ref-Nakamura-Science:
+
+10243. Nakamura, N., & Huang, C. S. (2018). Atmospheric blocking as a traffic jam in the jet stream. *Science*, **361(6397)**, 42-47, `doi:10.1126/science.aat0721 <https://doi.org/10.1126/science.aat0721>`__.
+
+.. _ref-Nakamura-Solomon-JAS-2010:
+
+10244. Nakamura, N., & Solomon, A. (2010). Finite-amplitude wave activity and mean flow adjustments in the atmospheric general circulation. Part I: Quasigeostrophic theory and analysis. *Journal of the atmospheric sciences*, **67(12)**, 3967-3983, `doi:10.1175/2010JAS3503.1 <https://doi.org/10.1175/2010JAS3503.1>`__.
+
+.. _ref-Nakamura-Solomon-JAS-2011:
+
+10245. Nakamura, N., & Solomon, A. (2011). Finite-amplitude wave activity and mean flow adjustments in the atmospheric general circulation. Part II: Analysis in the isentropic coordinate. Journal of the atmospheric sciences, 68(11), 2783-2799, `doi:10.1175/2011JAS3685.1 <https://doi.org/10.1175/2011JAS3685.1>`__.
+
+.. _ref-Huang-Nakamura-JAS-2016:
+
+10246. Huang, C. S., & Nakamura, N. (2016). Local finite-amplitude wave activity as a diagnostic of anomalous weather events. Journal of the Atmospheric Sciences, 73(1), 211-229, `doi:10.1175/JAS-D-15-0194.1 <https://doi.org/10.1175/JAS-D-15-0194.1>`__.
+
+.. _ref-Huang-Nakamura-GRL-2017:
+
+10247. Huang, C. S., & Nakamura, N. (2017). Local wave activity budgets of the wintertime Northern Hemisphere: Implication for the Pacific and Atlantic storm tracks. Geophysical Research Letters, 44(11), 5673-5682, `doi:10.1002/2017GL073760 <https://doi.org/10.1002/2017GL073760>`__.
+
+
 
 More about this diagnostic
 --------------------------
