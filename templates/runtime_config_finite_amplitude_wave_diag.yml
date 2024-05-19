@@ -12,7 +12,7 @@ case_list:
     model: "test"
     convention: "CMIP"
     startdate: "19800101000000"
-    enddate: "19810101000000"
+    enddate: "19801231000000"
 
 ### Data location settings ###
 # Required: full or relative path to ESM-intake catalog header file
