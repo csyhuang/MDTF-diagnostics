@@ -23,11 +23,25 @@ Clare S. Y. Huang\ |^1|, Christopher Polster |^2| and Noboru Nakamura\ |^1|
 
 .. rst-class:: center
 
-Last update: 03/12/2024
+Last update: 05/06/2024
 
 Description
 -----------
-(to be filled in )
+Large-scale circulation of the atmosphere in the Earth’s extratropics is dominated by eddies, eastward (westerly) zonal winds, and their interaction. Eddies not only bring about weather variabilities but also help maintain the average state of climate. Although Linear Rossby Wave theory for the zonal-mean zonal circulation and its response to eddy forcing was fully developed, the corresponding theory for eddy and its role in redistributing angular momentum and heat was mostly linear and thus limited to small-amplitude eddy. This limits its application to meteorological data where finite-amplitude eddies exist.
+
+The Finite-amplitude Rossby wave theory developed by Noboru Nakamura and collaborators have formulated new dynamical constraints on finite-amplitude eddies and the related eddy-free reference state. 
+
+
+
+In recent years, our understanding of how large-
+scale eddies and mean flows interact in the extratropical atmosphere has
+advanced significantly due to  This article reviews the
+theoretical foundations for finite-amplitude Rossby wave activity and re-
+lated concepts. Theory is then applied to atmospheric data to elucidate how
+angular momentum is redistributed by the generation, transmission, and
+dissipation of Rossby waves and to reveal how an anomalously large wave
+event such as atmospheric blocking may arise from regional eddy-mean flow
+interaction.
 
 .. Underline with '-'s to make a second-level heading.
 
