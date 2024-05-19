@@ -42,18 +42,17 @@ from falwa.xarrayinterface import QGDataset
 from falwa.oopinterface import QGFieldNH18
 from falwa.constant import P_GROUND, SCALE_HEIGHT
 
-if socket.gethostname() == 'otc':
-    matplotlib.use('Agg')  # non-X windows backend
-
 # 1) Loading model data files:
 #
 # The framework copies model data to a regular directory structure of the form
 # <DATADIR>/<frequency>/<CASENAME>.<variable_name>.<frequency>.nc
 # Here <variable_name> and frequency are requested in the "varlist" part of 
 # settings.json.
-already_done_gridfill: bool = True
 load_environ: bool = (socket.gethostname() == 'otc')
 frequency = "day"  # TODO: change later
+
+if socket.gethostname() == 'otc':
+    matplotlib.use('Agg')  # non-X windows backend
 
 if load_environ:  # otc path
     print(
@@ -197,32 +196,41 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
 
     cmap = "jet"
 
-    height_lat_plotter = HeightLatPlotter(figsize=(4, 4), title_str=title_str, xgrid=original_grid['lat'],
-                                          ygrid=analysis_height_array, cmap=cmap, xlim=[-80, 80])
-    height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_u, cmap=cmap,
-                                              var_title_str='zonal mean U',
-                                              save_path=f"{plot_dir}{season}_zonal_mean_u.eps", num_level=30)
-    height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_lwa, cmap=cmap,
-                                              var_title_str='zonal mean LWA',
-                                              save_path=f"{plot_dir}{season}_zonal_mean_lwa.eps", num_level=30)
-    height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.uref, cmap=cmap,
-                                              var_title_str='zonal mean Uref',
-                                              save_path=f"{plot_dir}{season}_zonal_mean_uref.eps", num_level=30)
-    height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_u - seasonal_average_data.uref,
-                                              cmap=cmap, var_title_str='zonal mean $\Delta$ U',
-                                              save_path=f"{plot_dir}{season}_zonal_mean_delta_u.eps", num_level=30)
+    height_lat_plotter = HeightLatPlotter(
+        figsize=(4, 4), title_str=title_str, xgrid=original_grid['lat'],
+        ygrid=analysis_height_array, cmap=cmap, xlim=[-80, 80])
+    height_lat_plotter.plot_and_save_variable(
+        variable=seasonal_average_data.zonal_mean_u, cmap=cmap,
+        var_title_str='zonal mean U',
+        save_path=f"{plot_dir}{season}_zonal_mean_u.eps", num_level=30)
+    height_lat_plotter.plot_and_save_variable(
+        variable=seasonal_average_data.zonal_mean_lwa, cmap=cmap,
+        var_title_str='zonal mean LWA',
+        save_path=f"{plot_dir}{season}_zonal_mean_lwa.eps", num_level=30)
+    height_lat_plotter.plot_and_save_variable(
+        variable=seasonal_average_data.uref, cmap=cmap,
+        var_title_str='zonal mean Uref',
+        save_path=f"{plot_dir}{season}_zonal_mean_uref.eps", num_level=30)
+    height_lat_plotter.plot_and_save_variable(
+        variable=seasonal_average_data.zonal_mean_u - seasonal_average_data.uref, cmap=cmap,
+        var_title_str='zonal mean $\Delta$ U',
+        save_path=f"{plot_dir}{season}_zonal_mean_delta_u.eps", num_level=30)
 
     # Use encapsulated class to plot
-    lat_lon_plotter = LatLonMapPlotter(figsize=(6, 3), title_str=title_str, xgrid=original_grid['lon'],
-                                       ygrid=original_grid['lat'], cmap=cmap, xland=xland, yland=yland,
-                                       lon_range=lon_range, lat_range=lat_range)
-    lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.u_baro, cmap=cmap, var_title_str='U baro',
-                                           save_path=f"{plot_dir}{season}_u_baro.eps", num_level=30)
-    lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.lwa_baro, cmap=cmap, var_title_str='LWA baro',
-                                           save_path=f"{plot_dir}{season}_lwa_baro.eps", num_level=30)
-    lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.covariance_lwa_u_baro, cmap="Purples_r",
-                                           var_title_str='Covariance between LWA and U(baro)',
-                                           save_path=f"{plot_dir}{season}_u_lwa_covariance.eps", num_level=30)
+    lat_lon_plotter = LatLonMapPlotter(
+        figsize=(6, 3), title_str=title_str, xgrid=original_grid['lon'],
+        ygrid=original_grid['lat'], cmap=cmap, xland=xland, yland=yland,
+        lon_range=lon_range, lat_range=lat_range)
+    lat_lon_plotter.plot_and_save_variable(
+        variable=seasonal_average_data.u_baro, cmap=cmap, var_title_str='U baro',
+        save_path=f"{plot_dir}{season}_u_baro.eps", num_level=30)
+    lat_lon_plotter.plot_and_save_variable(
+        variable=seasonal_average_data.lwa_baro, cmap=cmap, var_title_str='LWA baro',
+        save_path=f"{plot_dir}{season}_lwa_baro.eps", num_level=30)
+    lat_lon_plotter.plot_and_save_variable(
+        variable=seasonal_average_data.covariance_lwa_u_baro, cmap="Purples_r",
+        var_title_str='Covariance between LWA and U(baro)',
+        save_path=f"{plot_dir}{season}_u_lwa_covariance.eps", num_level=30)
 
 
 # === 3) Saving output data ===
@@ -305,10 +313,11 @@ model_dataset.close()
 #
 # In addition to your language's normal housekeeping, don't forget to delete any
 # temporary/scratch files you created in step 4).
-# os.system(f"rm -f {wk_dir}/model/gridfill_*.nc")
-# os.system(f"rm -f {wk_dir}/model/intermediate_*.nc")
+os.system(f"rm -f {wk_dir}/model/gridfill_*.nc")
+os.system(f"rm -f {wk_dir}/model/intermediate_*.nc")
 
-### 7) Error/Exception-Handling Example ########################################
+
+# 7) Error/Exception-Handling Example ########################################
 # nonexistent_file_path = "{DATADIR}/mon/nonexistent_file.nc".format(**os.environ)
 # try:
 #     nonexistent_dataset = xr.open_dataset(nonexistent_file_path)
@@ -316,6 +325,6 @@ model_dataset.close()
 #     print(error)
 #     print("This message is printed by the example POD because exception-handling is working!")
 
-### 8) Confirm POD executed sucessfully ########################################
+# 8) Confirm POD executed sucessfully ########################################
 print("POD Finite-amplitude wave diagnostic (zonal mean) finished successfully!")
 
