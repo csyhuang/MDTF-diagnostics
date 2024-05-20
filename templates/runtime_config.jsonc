@@ -24,18 +24,26 @@
   // Add other PODs that work on ensemble datasets to the pod_list as needed
   "pod_list" : [
       //"example"
-     "finite_amplitude_wave_diag"
+     "example_multicase"
    ],
    // Each case corresponds to a different simulation/output dataset
    // startdate, enddate: either YYYY-MM-DD, YYYYMMDD:HHMMSS, or YYYY-MM-DD:HHMMSS
    "case_list":
     {
-      "GFDL-CM3_historical_r1i1p1":
+      "CMIP_Synthetic_r1i1p1f1_gr1_19800101-19841231":
         {
           "model": "test",
           "convention": "CMIP",
-          "startdate": "19800101000000",
-          "enddate": "19801231000000"
+          "startdate": "19800101120000",
+          "enddate": "19841231000000"
+        }
+      ,
+      "CMIP_Synthetic_r1i1p1f1_gr1_19850101-19891231":
+        {
+          "model": "test",
+          "convention": "CMIP",
+          "startdate": "19850101",
+          "enddate": "19891231"
         }
     },
   // PATHS ---------------------------------------------------------------------
@@ -59,12 +67,12 @@
 
   // Location of the Anaconda/miniconda or micromamba installation to use for managing
   // dependencies (path returned by running `conda info --base` or `micromamba info`.)
-  "conda_root": "/home/clare/miniconda3",
+  "conda_root": "",
 
   // Directory containing the framework-specific conda environments. This should
   // be equal to the "--env_dir" flag passed to conda_env_setup.sh. If left
   // blank, the framework will look for its environments in conda_root/envs
-  "conda_env_root": "/home/clare/miniconda3/envs",
+  "conda_env_root": "",
 
   // Location of the micromamba executable. Required if using micromamba
   "micromamba_exe": "",
