@@ -41,6 +41,15 @@ class TranslatedVarlistEntry(data_model.DMVariable):
     scalar_coords: list = \
         dc.field(init=False, default_factory=list, metadata={'query': True})
     log: typing.Any = util.MANDATORY  # assigned from parent var
+    _requires_level_extraction = None
+
+    @property
+    def requires_level_extraction(self) -> bool:
+        return self._requires_level_extraction
+
+    @requires_level_extraction.setter
+    def requires_level_extraction(self, value: bool):
+        self._requires_level_extraction = value
 
 
 @util.mdtf_dataclass
@@ -302,7 +311,6 @@ class Fieldlist:
                                                f' by translate_coord')
         else:
             new_coord = [lut1.values()][0]
-
         if hasattr(coord, 'is_scalar') and coord.is_scalar:
             coord_name = ""
             if new_coord.get('name', None):
@@ -322,6 +330,7 @@ class Fieldlist:
         else:
             new_coord = dc.replace(coord,
                                    **(util.filter_dataclass(new_coord, coord)))
+
         return new_coord
 
     def translate(self, var, from_convention: str):

@@ -188,6 +188,9 @@ class _DMCoordinateShared:
     value: typing.Union[int, float, str] = None
     need_bounds: bool = False
 
+    def __init__(self):
+        self._is_scalar = None
+
     @property
     def bounds(self):
         """The *bounds_var* attribute is stored as a pointer to the actual object
@@ -212,7 +215,18 @@ class _DMCoordinateShared:
         <http://cfconventions.org/Data/cf-conventions/cf-conventions-1.8/cf-conventions.html#scalar-coordinate-variables>`__
         (bool).
         """
-        return self.value is not None
+        if not isinstance(self.value, str):
+            return self.value is not None
+        else:
+            return ''.join(self.value.split()) != ""
+
+    @is_scalar.setter
+    def is_scalar(self, value: bool):
+        """Whether the coordinate is a `scalar coordinate
+        <http://cfconventions.org/Data/cf-conventions/cf-conventions-1.8/cf-conventions.html#scalar-coordinate-variables>`__
+        (bool).
+        """
+        self._is_scalar = value
 
     def make_scalar(self, new_value):
         """Returns a copy of the coordinate, converted to a scalar coordinate
@@ -585,6 +599,9 @@ class _DMDimensionsMixin:
     dims: list = dc.field(init=False, default_factory=list)
     scalar_coords: list = dc.field(init=False, default_factory=list)
 
+    def __init__(self):
+        self._dim_axes = None
+
     def __post_init__(self, coords=None):
         if coords is None:
             # if we're called to rebuild dicts, rather than after __init__
@@ -607,6 +624,10 @@ class _DMDimensionsMixin:
         dimension coordinate objects.
         """
         return self.build_axes(self.dims, verify=False)
+
+    @dim_axes.setter
+    def dim_axes(self, value):
+        self._dim_axes = value
 
     @property
     def X(self):
@@ -637,6 +658,10 @@ class _DMDimensionsMixin:
     def dim_axes_set(self):
         """Return frozenset of dimension coordinate axes labels."""
         return frozenset(self.dim_axes.keys())
+
+    @dim_axes_set.setter
+    def dim_axes_set(self, value):
+        self._dim_axes_set = value
 
     @property
     def is_static(self):
@@ -773,6 +798,10 @@ class DMDependentVariable(_DMDimensionsMixin, AbstractDMDependentVariable):
         """
         return self.build_axes(self.dims, self.scalar_coords, verify=False)
 
+    @axes.setter
+    def axes(self, value):
+        self._axes = value
+
     @property
     def axes_set(self):
         """Superset of the :meth:`dim_axes_set` frozenset (which contains axes labels
@@ -780,6 +809,53 @@ class DMDependentVariable(_DMDimensionsMixin, AbstractDMDependentVariable):
         corresponding to scalar coordinates.
         """
         return frozenset(self.axes.keys())
+
+    @axes_set.setter
+    def axes_set(self, value):
+        self._axes_set = value
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, value: str):
+        self._name = value
+
+    @property
+    def standard_name(self):
+        return self._standard_name
+
+    @standard_name.setter
+    def standard_name(self, value: str):
+        self._standard_name = value.lower()
+
+    @property
+    def units(self):
+        return self._units
+
+    @units.setter
+    def units(self, value):
+        self._units = value
+
+    @property
+    def long_name(self):
+        return self._long_name
+
+    @long_name.setter
+    def long_name(self, value: str):
+        self._long_name = value
+
+    @property
+    def realm(self):
+        return self._realm
+
+    @realm.setter
+    def realm(self, value: str):
+        self._realm = value
+
+
+
 
     def add_scalar(self, ax, ax_value, **kwargs):
         """Metadata operation corresponding to taking a slice of a higher-dimensional
