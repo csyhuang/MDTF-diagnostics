@@ -197,7 +197,7 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
 
     cmap = "jet"
 
-    height_lat_plotter = HeightLatPlotter(figsize=(4, 4), title_str=title_str, xgrid=original_grid[lon_name],
+    height_lat_plotter = HeightLatPlotter(figsize=(4, 4), title_str=title_str, xgrid=original_grid[lat_name],
                                           ygrid=analysis_height_array, cmap=cmap, xlim=[-80, 80])
     height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_u, cmap=cmap,
                                               var_title_str='zonal mean U',
