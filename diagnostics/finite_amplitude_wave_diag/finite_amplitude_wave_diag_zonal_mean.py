@@ -197,7 +197,7 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
 
     cmap = "jet"
 
-    height_lat_plotter = HeightLatPlotter(figsize=(4, 4), title_str=title_str, xgrid=original_grid['lat'],
+    height_lat_plotter = HeightLatPlotter(figsize=(4, 4), title_str=title_str, xgrid=original_grid[lon_name],
                                           ygrid=analysis_height_array, cmap=cmap, xlim=[-80, 80])
     height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_u, cmap=cmap,
                                               var_title_str='zonal mean U',
@@ -213,8 +213,8 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
                                               save_path=f"{plot_dir}{season}_zonal_mean_delta_u.eps", num_level=30)
 
     # Use encapsulated class to plot
-    lat_lon_plotter = LatLonMapPlotter(figsize=(6, 3), title_str=title_str, xgrid=original_grid['lon'],
-                                       ygrid=original_grid['lat'], cmap=cmap, xland=xland, yland=yland,
+    lat_lon_plotter = LatLonMapPlotter(figsize=(6, 3), title_str=title_str, xgrid=original_grid[lon_name],
+                                       ygrid=original_grid[lat_name], cmap=cmap, xland=xland, yland=yland,
                                        lon_range=lon_range, lat_range=lat_range)
     lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.u_baro, cmap=cmap, var_title_str='U baro',
                                            save_path=f"{plot_dir}{season}_u_baro.eps", num_level=30)
