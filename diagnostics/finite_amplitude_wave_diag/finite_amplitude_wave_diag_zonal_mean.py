@@ -65,9 +65,9 @@ print(
 # uvt_path = f"{os.environ['DATADIR']}/{frequency}/{os.environ['CASENAME']}.[uvt]a.{frequency}.nc"
 # casename = os.environ["CASENAME"]
 
-# *** Rerun on iMac ***
-wk_dir = f"/Users/claresyhuang/Library/CloudStorage/Dropbox/GitHub/hn2016_falwa/github_data_storage/scratch/"
-uvt_path = f"/Users/claresyhuang/Library/CloudStorage/Dropbox/GitHub/hn2016_falwa/github_data_storage/2022_01_[uvt].nc"
+# *** Rerun on OTC ***
+wk_dir = "/home/clare/GitHub/mdtf/inputdata/obs_data/era5/"
+uvt_path = f"{wk_dir}2022_01_[uvt].nc"
 casename = "ERA5"
 
 
