@@ -209,11 +209,15 @@ class DataPreprocessor:
     def output_preprocess_data(self, sampled_dataset, output_path):
         """
         Main procedure executed by this class
+        TODO: debug the logic here
         """
         self._save_original_coordinates(sampled_dataset)
         self._check_if_gridfill_is_needed(sampled_dataset)
         gridfill_path = self._implement_gridfill(sampled_dataset)
-        gridfilled_dataset = xr.open_mfdataset(gridfill_path)
+        if self._gridfill_needed:
+            gridfilled_dataset = xr.open_mfdataset(gridfill_path)
+        else:
+            gridfilled_dataset = sampled_dataset
         dataset = self._interpolate_onto_regular_grid(gridfilled_dataset)  # Interpolate onto regular grid
         gridfilled_dataset.close()
         self._save_preprocessed_data(dataset, output_path)  # Save preprocessed data

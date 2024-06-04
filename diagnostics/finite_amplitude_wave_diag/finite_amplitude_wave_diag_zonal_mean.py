@@ -52,17 +52,24 @@ if socket.gethostname() == 'otc':
 # Here <variable_name> and frequency are requested in the "varlist" part of 
 # settings.json.
 already_done_gridfill: bool = True
+environ_name = socket.gethostname()
 # load_environ: bool = (socket.gethostname() == 'otc')
 frequency = "day"  # TODO: change later
 
 print(
     f"""
-    Start running on OTC. Print out all environment variables:
+    Start running on {environ_name}. Print out all environment variables:
     {os.environ}
     """)
-wk_dir = os.environ["WK_DIR"]
-uvt_path = f"{os.environ['DATADIR']}/{frequency}/{os.environ['CASENAME']}.[uvt]a.{frequency}.nc"
-casename = os.environ["CASENAME"]
+# wk_dir = os.environ["WK_DIR"]
+# uvt_path = f"{os.environ['DATADIR']}/{frequency}/{os.environ['CASENAME']}.[uvt]a.{frequency}.nc"
+# casename = os.environ["CASENAME"]
+
+# *** Rerun on iMac ***
+wk_dir = f"/Users/claresyhuang/Library/CloudStorage/Dropbox/GitHub/hn2016_falwa/github_data_storage/scratch/"
+uvt_path = f"/Users/claresyhuang/Library/CloudStorage/Dropbox/GitHub/hn2016_falwa/github_data_storage/2022_01_[uvt].nc"
+casename = "ERA5"
+
 
 print(
     f"""
@@ -72,13 +79,13 @@ print(
     """)
 
 # *** Coordinates of input dataset ***
-u_var_name = "ua"
-v_var_name = "va"
-t_var_name = "ta"
+u_var_name = "u"
+v_var_name = "v"
+t_var_name = "t"
 time_coord_name = "time"
-plev_name = "plev"
-lat_name = "lat"
-lon_name = "lon"
+plev_name = "level"
+lat_name = "latitude"
+lon_name = "longitude"
 
 # *** Regular analysis grid defined by developer ***
 xlon = np.arange(0, 360, 1.0)
@@ -86,8 +93,8 @@ ylat = np.arange(-90, 91, 1.0)
 
 # 2) Doing computations:
 model_dataset = xr.open_mfdataset(uvt_path)  # command to load the netcdf file
-firstyr = model_dataset.coords['time'].values[0].year
-lastyr = model_dataset.coords['time'].values[-1].year
+firstyr = 2022
+lastyr = 2022
 if model_dataset[plev_name].units == 'Pa':  # Pa shall be divided by 100 to become hPa
     print("model_dataset[plev_name].units == 'Pa'. Convert it to hPa.")
     model_dataset = model_dataset.assign_coords({plev_name: model_dataset[plev_name] // 100})
