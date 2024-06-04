@@ -176,7 +176,7 @@ def time_average_processing(dataset: xr.Dataset):
     seasonal_avg_uref = dataset.uref.mean(axis=0)
     seasonal_avg_lwa_baro = dataset.lwa_baro.mean(axis=0)
     seasonal_avg_u_baro = dataset.u_baro.mean(axis=0)
-    seasonal_covariance_lwa_u_baro = calculate_covariance(lwa_baro=dataset.lwa_baro, u_baro=dataset.u_baro)
+    seasonal_covariance_lwa_u_baro = None # calculate_covariance(lwa_baro=dataset.lwa_baro, u_baro=dataset.u_baro)
     seasonal_avg_data = SeasonalAverage(
         seasonal_avg_zonal_mean_u, seasonal_avg_uref, seasonal_avg_zonal_mean_lwa,
         seasonal_avg_lwa_baro, seasonal_avg_u_baro, seasonal_covariance_lwa_u_baro)
@@ -220,9 +220,9 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
                                            save_path=f"{plot_dir}{season}_u_baro.eps", num_level=30)
     lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.lwa_baro, cmap=cmap, var_title_str='LWA baro',
                                            save_path=f"{plot_dir}{season}_lwa_baro.eps", num_level=30)
-    lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.covariance_lwa_u_baro, cmap="Purples_r",
-                                           var_title_str='Covariance between LWA and U(baro)',
-                                           save_path=f"{plot_dir}{season}_u_lwa_covariance.eps", num_level=30)
+    # lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.covariance_lwa_u_baro, cmap="Purples_r",
+    #                                        var_title_str='Covariance between LWA and U(baro)',
+    #                                        save_path=f"{plot_dir}{season}_u_lwa_covariance.eps", num_level=30)
 
 
 # === 3) Saving output data ===
