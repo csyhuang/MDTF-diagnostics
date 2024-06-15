@@ -39,7 +39,7 @@ from typing import Dict
 import numpy as np
 import xarray as xr  # python library we use to read netcdf files
 from falwa.xarrayinterface import QGDataset
-from falwa.oopinterface import QGFieldNH18
+from falwa.oopinterface import QGFieldNHN22
 from falwa.constant import P_GROUND, SCALE_HEIGHT
 
 if socket.gethostname() == 'otc':
@@ -66,9 +66,10 @@ print(
 # casename = os.environ["CASENAME"]
 
 # *** Rerun on OTC ***
-wk_dir = "/home/clare/GitHub/mdtf/inputdata/obs_data/era5/"
-uvt_path = f"{wk_dir}2022_01_[uvt].nc"
-casename = "ERA5"
+wk_dir = "/home/clare/GitHub/mdtf/scratch"
+data_dir = "/home/clare/GitHub/mdtf/inputdata/model/GFDL-CM4/data/atmos/ts/6hr/1yr/"
+uvt_path = f"{data_dir}atmos.2000010100-2000123123.[uvt]a.nc"
+casename = "GFDL-CM4"
 
 
 print(
@@ -79,13 +80,13 @@ print(
     """)
 
 # *** Coordinates of input dataset ***
-u_var_name = "u"
-v_var_name = "v"
-t_var_name = "t"
+u_var_name = "ua"
+v_var_name = "va"
+t_var_name = "ta"
 time_coord_name = "time"
 plev_name = "level"
-lat_name = "latitude"
-lon_name = "longitude"
+lat_name = "lat"
+lon_name = "lon"
 
 # *** Regular analysis grid defined by developer ***
 xlon = np.arange(0, 360, 1.0)
@@ -125,7 +126,7 @@ def compute_from_sampled_data(gridfilled_dataset: xr.Dataset):
     qgds = QGDataset(
         gridfilled_dataset,
         var_names={"u": u_var_name, "v": v_var_name, "t": t_var_name},
-        qgfield=QGFieldNH18,
+        qgfield=QGFieldNHN22,
         qgfield_kwargs={"dz": dz, "kmax": kmax})
     gridfilled_dataset.close()
     # Compute reference states and LWA
@@ -201,28 +202,28 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
                                           ygrid=analysis_height_array, cmap=cmap, xlim=[-80, 80])
     height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_u, cmap=cmap,
                                               var_title_str='zonal mean U',
-                                              save_path=f"{plot_dir}{season}_zonal_mean_u.eps", num_level=30)
+                                              save_path=f"{plot_dir}{season}_zonal_mean_u.png", num_level=30)
     height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_lwa, cmap=cmap,
                                               var_title_str='zonal mean LWA',
-                                              save_path=f"{plot_dir}{season}_zonal_mean_lwa.eps", num_level=30)
+                                              save_path=f"{plot_dir}{season}_zonal_mean_lwa.png", num_level=30)
     height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.uref, cmap=cmap,
                                               var_title_str='zonal mean Uref',
-                                              save_path=f"{plot_dir}{season}_zonal_mean_uref.eps", num_level=30)
+                                              save_path=f"{plot_dir}{season}_zonal_mean_uref.png", num_level=30)
     height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_u - seasonal_average_data.uref,
                                               cmap=cmap, var_title_str='zonal mean $\Delta$ U',
-                                              save_path=f"{plot_dir}{season}_zonal_mean_delta_u.eps", num_level=30)
+                                              save_path=f"{plot_dir}{season}_zonal_mean_delta_u.png", num_level=30)
 
     # Use encapsulated class to plot
     lat_lon_plotter = LatLonMapPlotter(figsize=(6, 3), title_str=title_str, xgrid=original_grid[lon_name],
                                        ygrid=original_grid[lat_name], cmap=cmap, xland=xland, yland=yland,
                                        lon_range=lon_range, lat_range=lat_range)
     lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.u_baro, cmap=cmap, var_title_str='U baro',
-                                           save_path=f"{plot_dir}{season}_u_baro.eps", num_level=30)
+                                           save_path=f"{plot_dir}{season}_u_baro.png", num_level=30)
     lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.lwa_baro, cmap=cmap, var_title_str='LWA baro',
-                                           save_path=f"{plot_dir}{season}_lwa_baro.eps", num_level=30)
+                                           save_path=f"{plot_dir}{season}_lwa_baro.png", num_level=30)
     # lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.covariance_lwa_u_baro, cmap="Purples_r",
     #                                        var_title_str='Covariance between LWA and U(baro)',
-    #                                        save_path=f"{plot_dir}{season}_u_lwa_covariance.eps", num_level=30)
+    #                                        save_path=f"{plot_dir}{season}_u_lwa_covariance.png", num_level=30)
 
 
 # === 3) Saving output data ===
@@ -239,7 +240,7 @@ season_to_months = [
 intermediate_output_paths: Dict[str, str] = {
     item[0]: f"{wk_dir}/{model_or_obs}/intermediate_{item[0]}.nc" for item in season_to_months}
 
-for season, selected_months in season_to_months:
+for season, selected_months in season_to_months[:1]:
     print(f"season: {season}")
     # Construct data preprocessor
     data_preprocessor = DataPreprocessor(
@@ -252,7 +253,7 @@ for season, selected_months in season_to_months:
     print("Start samping data in frequency 'day'.")
     sampled_dataset = model_dataset.where(
         model_dataset.time.dt.month.isin(selected_months), drop=True) \
-        .groupby("time.day").first(skipna=False)
+        .groupby("time.day").mean()
     preprocessed_output_path = intermediate_output_paths[season]  # TODO set it
     print(f"Start preparing intermediate data in the directory: {preprocessed_output_path}")
     data_preprocessor.output_preprocess_data(
