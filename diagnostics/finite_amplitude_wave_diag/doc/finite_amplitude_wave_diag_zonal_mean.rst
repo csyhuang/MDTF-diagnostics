@@ -120,8 +120,6 @@ References
 
 10247. Huang, C. S., & Nakamura, N. (2017). Local wave activity budgets of the wintertime Northern Hemisphere: Implication for the Pacific and Atlantic storm tracks. Geophysical Research Letters, 44(11), 5673-5682, `doi:10.1002/2017GL073760 <https://doi.org/10.1002/2017GL073760>`__.
 
-
-
 More about this diagnostic
 --------------------------
 
