@@ -8,9 +8,6 @@ from falwa.constant import P_GROUND, SCALE_HEIGHT
 from matplotlib import gridspec
 from cartopy import crs as ccrs
 
-# from diagnostics.finite_amplitude_wave_diag.finite_amplitude_wave_diag_zonal_mean import plev_name, lat_name, lon_name, \
-#     sampled_dataset
-
 
 def gridfill_each_level(lat_lon_field, itermax=1000, verbose=False):
     """
@@ -36,23 +33,31 @@ def gridfill_each_level(lat_lon_field, itermax=1000, verbose=False):
 
 
 class LatLonMapPlotter(object):
-    def __init__(self, figsize, title_str, xgrid, ygrid, cmap, xland, yland, lon_range, lat_range):
+    def __init__(self, figsize, title_str, xgrid, ygrid, xland, yland, lon_range, lat_range,
+                 wspace=0.3, hspace=0.3, coastlines_alpha=0.7, exclude_equator=True, white_space_width=20):
+
         self._figsize = figsize
         self._title_str = title_str
         self._xgrid = xgrid
         self._ygrid = ygrid
-        self._cmap = cmap
         self._xland = xland
         self._yland = yland
         self._lon_range = lon_range
         self._lat_range = lat_range
+        self._wspace = wspace
+        self._hspace = hspace
+        self._coastlines_alpha = coastlines_alpha
+        self._exclude_equator = exclude_equator
+        self._white_space_width = white_space_width
 
-    def plot_and_save_variable(self, variable, cmap, var_title_str, save_path, num_level=30):
+    def plot_and_save_variable(self, variable, cmap, var_title_str, save_path="figure.png", num_level=30):
+        from matplotlib import gridspec
+        from cartopy import crs as ccrs
         fig = plt.figure(figsize=self._figsize)
         spec = gridspec.GridSpec(
-            ncols=1, nrows=1, wspace=0.3, hspace=0.3)
+            ncols=1, nrows=1, wspace=self._wspace, hspace=self._hspace)
         ax = fig.add_subplot(spec[0], projection=ccrs.PlateCarree())
-        ax.coastlines(color='black', alpha=0.7)
+        ax.coastlines(color='black', alpha=self._coastlines_alpha)
         ax.set_aspect('auto', adjustable=None)
         main_fig = ax.contourf(
             self._xgrid, self._ygrid,
@@ -60,11 +65,14 @@ class LatLonMapPlotter(object):
             num_level,
             cmap=cmap)
         ax.scatter(self._xgrid[self._xland], self._ygrid[self._yland], s=1, c='gray')
+        if self._exclude_equator:
+            ax.axhline(y=0, c='w', lw=self._white_space_width)
         ax.set_xticks(self._lon_range, crs=ccrs.PlateCarree())
         ax.set_yticks(self._lat_range, crs=ccrs.PlateCarree())
         fig.colorbar(main_fig, ax=ax)
         ax.set_title(f"{self._title_str}\n{var_title_str}")
-        plt.savefig(save_path, bbox_inches='tight')
+        if save_path:  # input save path is not None
+            plt.savefig(save_path, bbox_inches='tight')
         # plt.savefig(save_path.replace("/PS/", "/").replace(".eps", ".png"), bbox_inches='tight')  # Do I need this?
         plt.show()
 
@@ -75,7 +83,6 @@ class HeightLatPlotter(object):
         self._title_str = title_str
         self._xgrid = xgrid
         self._ygrid = ygrid
-        self._cmap = cmap
         self._xlim = xlim  # [-80, 80]
 
     def plot_and_save_variable(self, variable, cmap, var_title_str, save_path, num_level=30):
@@ -88,7 +95,7 @@ class HeightLatPlotter(object):
             self._ygrid,
             variable,
             num_level,
-            cmap=cmap if cmap else self._cmap)
+            cmap=cmap)
         fig.colorbar(main_fig, ax=ax)
         ax.set_title(f"{self._title_str}\n{var_title_str}")
         ax.set_xlim(self._xlim)

@@ -24,6 +24,7 @@
 # ================================================================================
 #   References (not written yet)
 # ================================================================================
+import itertools
 import os
 import gc
 import socket
@@ -145,21 +146,22 @@ def compute_from_sampled_data(gridfilled_dataset: xr.Dataset):
     return output_dataset
 
 
-def calculate_covariance(lwa_baro, u_baro):
+def calculate_covariance(var_a, var_b):
     """
-    Calculate covariance.
+    Calculate covariance of two variables in time.
     Args:
-        lwa_baro: dataset.lwa_baro
-        u_baro: dataset.u_baro
+        var_a: a numpy array or handle that can access elements via [time, lat, lon]
+        var_b: a numpy array or handle that can access elements via [time, lat, lon]
     Returns:
         cov_map in dimension of (lat, lon)
     """
-    baro_matrix_shape = lwa_baro.data.shape
-    flatten_lwa_baro = lwa_baro.data.reshape(baro_matrix_shape[0], baro_matrix_shape[1] * baro_matrix_shape[2])
-    flatten_u_baro = u_baro.data.reshape(baro_matrix_shape[0], baro_matrix_shape[1] * baro_matrix_shape[2])
-    covv = np.cov(m=flatten_lwa_baro, y=flatten_u_baro, rowvar=False)
-    row_cov = np.diagonal(covv, offset=baro_matrix_shape[1] * baro_matrix_shape[2])
-    cov_map = row_cov.reshape(baro_matrix_shape[1], baro_matrix_shape[2])
+    lat_dim = var_a.shape[1]
+    lon_dim = var_a.shape[2]
+    cov_map = np.zeros((lat_dim, lon_dim))
+    for j in range(lat_dim):  # has to loop through a dimension to conserve memory
+        cov_matrix = np.cov(m=var_a[:, j, :], y=var_b[:, j, :], rowvar=False)
+        row_cov = np.diagonal(cov_matrix, offset=lon_dim)
+        cov_map[j, :] = row_cov
     return cov_map
 
 
@@ -178,7 +180,7 @@ def time_average_processing(dataset: xr.Dataset):
     seasonal_avg_uref = dataset.uref.mean(axis=0)
     seasonal_avg_lwa_baro = dataset.lwa_baro.mean(axis=0)
     seasonal_avg_u_baro = dataset.u_baro.mean(axis=0)
-    seasonal_covariance_lwa_u_baro = calculate_covariance(lwa_baro=dataset.lwa_baro, u_baro=dataset.u_baro)
+    seasonal_covariance_lwa_u_baro = calculate_covariance(var_a=dataset.lwa_baro, var_b=dataset.u_baro)
     seasonal_avg_data = SeasonalAverage(
         seasonal_avg_zonal_mean_u, seasonal_avg_uref, seasonal_avg_zonal_mean_lwa,
         seasonal_avg_lwa_baro, seasonal_avg_u_baro, seasonal_covariance_lwa_u_baro)
@@ -216,7 +218,7 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
 
     # Use encapsulated class to plot
     lat_lon_plotter = LatLonMapPlotter(figsize=(6, 3), title_str=title_str, xgrid=original_grid['lon'],
-                                       ygrid=original_grid['lat'], cmap=cmap, xland=xland, yland=yland,
+                                       ygrid=original_grid['lat'], xland=xland, yland=yland,
                                        lon_range=lon_range, lat_range=lat_range)
     lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.u_baro, cmap=cmap, var_title_str='U baro',
                                            save_path=f"{plot_dir}{season}_u_baro.eps", num_level=30)
