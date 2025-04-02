@@ -7,6 +7,7 @@ import datetime
 import glob
 import io
 import shutil
+import yaml
 from src import util, verify_links
 
 import logging
@@ -264,6 +265,23 @@ class HTMLPodOutputManager(HTMLSourceFileMixin):
             for f in util.find_files(self.WORK_DIR, 'model/netCDF/*.nc'):
                 os.remove(f)
 
+    def cleanup_pp_data(self):
+        """Removes nc files found in catalog if the ``save_pp_data`` data 
+        is set to false.
+
+        This is done by looping through the ``case_info.yml`` file found in each 
+        POD. If the .nc file exists, it is then deleted.
+        """
+        if not self.save_nc:
+            for f in util.find_files(self.WORK_DIR, 'case_info.yml'):
+                case_info_yml = yaml.safe_load(open(f))
+                for case in case_info_yml['CASE_LIST']:
+                    for k in case_info_yml['CASE_LIST'][case]:
+                        if k.endswith('FILE') or k.endswith('FILES'):
+                            v = case_info_yml['CASE_LIST'][case][k]
+                            if v != '' and os.path.exists(v) and v.endswith('.nc'):
+                                os.remove(v)
+
     def make_output(self, config: util.NameSpace):
         """Top-level method to make POD-specific output, post-init. Split off
         into its own method to make subclassing easier.
@@ -281,6 +299,7 @@ class HTMLPodOutputManager(HTMLSourceFileMixin):
             self.convert_pod_figures(os.path.join('model', 'PS'), 'model')
             self.convert_pod_figures(os.path.join('obs', 'PS'), 'obs')
             self.cleanup_pod_files()
+            self.cleanup_pp_data()
 
 
 class HTMLOutputManager(AbstractOutputManager,
@@ -515,13 +534,35 @@ class HTMLOutputManager(AbstractOutputManager,
                            self.WORK_DIR, self.OUT_DIR)
         try:
             if os.path.exists(self.OUT_DIR):
-                if not self.overwrite:
+                if self.overwrite:
+                    # if overwrite flag is true, replace OUT_DIR contents with WORK_DIR
                     self.obj.log.error("%s: '%s' exists, overwriting.",
                                        self.obj.full_name, self.OUT_DIR)
-                shutil.rmtree(self.OUT_DIR)
+                    shutil.rmtree(self.OUT_DIR)
+                    shutil.move(self.WORK_DIR, self.OUT_DIR)
+                    return
+                elif not self.overwrite:
+                    # if ovewrite flag is false, find the next suitable 'MDTF_output.v#' dir to write to
+                    if not os.path.exists(os.path.join(self.OUT_DIR, 'index.html')):
+                        # this will catch the majority of cases
+                        shutil.rmtree(self.OUT_DIR)
+                        shutil.move(self.WORK_DIR, self.OUT_DIR)
+                        return
+                    # the rest of this if statement is not strictly necessary, but may be useful for fringe edge cases
+                    # if some reason a index.html already exists in self.OUT_DIR, it will move to the next .v#
+                    out_main_dir = os.path.abspath(os.path.join(self.OUT_DIR, ".."))
+                    v_dirs = [d for d in os.listdir(out_main_dir) if 'MDTF_output.v' in d]
+                    if not v_dirs:
+                        NEW_BASE = 'MDTF_output.v1'
+                    v_nums = sorted([int(''.join(filter(str.isdigit, d))) for d in v_dirs], reverse=True)
+                    NEW_BASE = f'MDTF_output.v{v_nums[0]+1}'
+                    self.OUT_DIR = os.path.join(out_main_dir, NEW_BASE)
+                    if os.path.isdir(self.OUT_DIR):
+                        shutil.rmtree(self.OUT_DIR)
+                    shutil.move(self.WORK_DIR, self.OUT_DIR)
+                    return
         except Exception:
             raise
-        shutil.move(self.WORK_DIR, self.OUT_DIR)
 
     def verify_pod_links(self, pod):
         """Check for missing files linked to from POD's html page.

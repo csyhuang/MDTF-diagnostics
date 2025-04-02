@@ -284,6 +284,7 @@ class SubprocessRuntimePODWrapper:
 
     def __init__(self, pod):
         self.pod = pod
+        self.env_vars = dict()
 
     def set_pod_env_vars(self, pod, cases: dict):
         """Sets all environment variables for the POD: paths and names of each
@@ -302,7 +303,7 @@ class SubprocessRuntimePODWrapper:
                 # define env vars for varlist entries without data. Name collisions
                 # are OK in this case.
                 try:
-                    self.pod_env_vars.update(var.env_vars)
+                    self.env_vars.update(var.env_vars)
                 except util.WormKeyError:
                     continue
 

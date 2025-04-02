@@ -11,7 +11,7 @@
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-#
+
 import os
 import sys
 import re
@@ -77,7 +77,7 @@ author = 'Model Diagnostics Task Force'
 # The short X.Y version
 version = ''
 # The full version, including alpha/beta/rc tags
-release = '4.0'
+release = '4.2'
 
 # only used for resolving relative links in markdown docs
 _project_github_url = 'https://github.com/NOAA-GFDL/MDTF-diagnostics/tree/main/'
@@ -154,7 +154,7 @@ html_theme_options = {
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
 # Sphinx automatically copies referenced image files.
-# html_static_path = ['_static']
+html_static_path = ['_static']
 
 html_logo = 'img/logo_MDTF.png'
 

@@ -625,11 +625,15 @@ class DateRange(AtomicInterval, DateMixin):
                     # start: split_str[start index of 0: nelem_half elements total], end[start index at nelem_half,
                     (start, end) = ''.join(split_str[:nelem_half]), ''.join(split_str[nelem_half:])
 
+
             elif len(start) == 2:
                 (start, end) = start
             else:
                 raise ValueError('Bad input ({},{})'.format(start, end))
-
+        if isinstance(start, str):
+            start = start.replace(':','')
+        if isinstance(end, str):
+            end = end.replace(':','')
         dt0, prec0 = self._coerce_to_datetime(start, is_lower=True)
         dt1, prec1 = self._coerce_to_datetime(end, is_lower=False)
         if not (dt0 < dt1):
@@ -1174,7 +1178,7 @@ class DateFrequency(datetime.timedelta):
         elif s in ['seasonally', 'seasonal', 'seasons', 'season', 'se']:
             s = 'season'
         elif s in ['monthly', 'month', 'months', 'mon', 'mo']:
-            s = 'mo'
+            s = 'mon'
         elif s in ['weekly', 'weeks', 'week', 'wk', 'w']:
             s = 'wk'
         elif s in ['daily', 'day', 'days', 'dy', 'd', 'diurnal', 'diurnally']:
@@ -1199,7 +1203,7 @@ class DateFrequency(datetime.timedelta):
             return {'days': 365 * q}
         elif s == 'season':
             return {'days': 91 * q}
-        elif s == 'mo':
+        elif s == 'mon':
             return {'days': 30 * q}
         elif s == 'wk':
             return {'weeks': q}
@@ -1230,7 +1234,7 @@ class DateFrequency(datetime.timedelta):
         (defined in :meth:`src.data_manager.DataManager.dest_path`.)
         """
         if self.quantity == 1:
-            if self.unit == 'mo':
+            if self.unit == 'mon':
                 return 'mon'
             elif self.unit == 'day':
                 return 'day'
