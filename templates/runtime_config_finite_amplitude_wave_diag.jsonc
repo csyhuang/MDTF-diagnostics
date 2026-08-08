@@ -30,12 +30,18 @@
    // startdate, enddate: either YYYY-MM-DD, YYYYMMDD:HHMMSS, or YYYY-MM-DD:HHMMSS
    "case_list":
     {
-      "GFDL-CM3_historical_r1i1p1":
+      // The case name must appear in the `path` column of the data catalog; here it
+      // is the CAM `case` global attribute, also the leading field of each file name.
+      "mdtf_timeslice_v4.ne120L58.001":
         {
-          "model": "test",
-          "convention": "CMIP",
-          "startdate": "19800101000000",
-          "enddate": "19801231000000"
+          "model": "CESM",
+          "convention": "CESM",
+          "startdate": "20010101060000",
+          "enddate": "20021231060000",
+          // Optional: refine the catalog query if the dataset realm/frequency
+          // differ from the values requested in the POD's settings.jsonc
+          "realm": "atmos",
+          "frequency": ""
         }
     },
   // PATHS ---------------------------------------------------------------------

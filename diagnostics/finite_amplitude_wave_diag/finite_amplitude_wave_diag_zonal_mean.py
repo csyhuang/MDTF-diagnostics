@@ -53,7 +53,7 @@ if socket.gethostname() == 'otc':
 # settings.json.
 already_done_gridfill: bool = True
 load_environ: bool = (socket.gethostname() == 'otc')
-frequency = "day"  # TODO: change later
+frequency = "6hr"  # must match the frequency requested in settings.jsonc
 
 if socket.gethostname() == 'otc':
     matplotlib.use('Agg')  # non-X windows backend
@@ -64,7 +64,7 @@ if load_environ:  # otc path
         Start running on OTC. Print out all environment variables:
         {os.environ}
         """)
-    wk_dir = os.environ["WK_DIR"]
+    wk_dir = os.environ["WORK_DIR"]
     uvt_path = f"{os.environ['DATADIR']}/{frequency}/{os.environ['CASENAME']}.[uvt]a.{frequency}.nc"
     casename = os.environ["CASENAME"]
 else:  # iMac path

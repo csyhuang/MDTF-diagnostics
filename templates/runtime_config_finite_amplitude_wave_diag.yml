@@ -7,16 +7,23 @@ pod_list:
   - "finite_amplitude_wave_diag"
 
 # Case list entries (must be unique IDs for each simulation)
+# convention: cmip, cesm, or gfdl
+# required: convention, startdate, enddate
+# optional: model, realm (used to refine query if dataset realm differs from POD realm), frequency
+# The case name must appear in the `path` column of the data catalog; here it is
+# the CAM `case` global attribute, which is also the leading field of each file name.
 case_list:
-  "GFDL-CM3_historical_r1i1p1" :
-    model: "test"
-    convention: "CMIP"
-    startdate: "19800101000000"
-    enddate: "19801231000000"
+  "mdtf_timeslice_v4.ne120L58.001" :
+    model: "CESM"
+    convention: "CESM"
+    startdate: "20010101060000"
+    enddate: "20021231060000"
+    realm: "atmos"
+    frequency: ""
 
 ### Data location settings ###
 # Required: full or relative path to ESM-intake catalog header file
-DATA_CATALOG: "./diagnostics/example_multicase/esm_catalog_CMIP_synthetic_r1i1p1f1_gr1.json"
+DATA_CATALOG: "./diagnostics/finite_amplitude_wave_diag/esm_catalog_mdtf_timeslice_v4_ne120L58_001.json"
 # Optional: Parent directory containing observational data used by individual PODs.
 # If defined, the framework assumes observational data is in OBS_DATA_ROOT/[POD_NAME]
 OBS_DATA_ROOT: "../inputdata/obs_data"
