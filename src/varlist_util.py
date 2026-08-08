@@ -71,8 +71,9 @@ class VarlistEntryBase(metaclass=util.MDTFABCMeta):
         path_variable: Name of env var containing path(s) to local data.
         dest_path: Path(s) to local data.
         alternates: List of lists of VarlistEntries.
-        translation: :class:`core.TranslatedVarlistEntry`, populated by DataSource.
+        translation: :class: `translation.TranslatedVarlistEntry`, populated by DataSource.
         data: dict mapping experiment_keys to DataKeys. Populated by DataSource.
+        scalar_coords: dict
     """
 
     def __init_subclass__(cls):
@@ -80,6 +81,7 @@ class VarlistEntryBase(metaclass=util.MDTFABCMeta):
             'use_exact_name',
             'env_var',
             'requirement',
+            'scalar_coords',
             'alternates',
             'translation',
             'data',
@@ -152,7 +154,7 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
         path_variable: Name of env var containing path to local data.
         dest_path: Path to local data.
         alternates: List of lists of VarlistEntries.
-        translation: :class:`core.TranslatedVarlistEntry`, populated by DataSource.
+        translation: :class:`translation.TranslatedVarlistEntry`, populated by DataSource.
         data: dict mapping experiment_keys to DataKeys. Populated by DataSource.
     """
     # _id = util.MDTF_ID()           # fields inherited from core.MDTFObjectBase
@@ -172,6 +174,7 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
     realm: str = dc.field(default="", compare=False)
     long_name: str = dc.field(default="", compare=False)
     dest_path: str = ""
+    convention: str = ""
     requirement: VarlistEntryRequirement = dc.field(
         default=VarlistEntryRequirement.REQUIRED, compare=False
     )
@@ -185,6 +188,7 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
     status: util.ObjectStatus = dc.field(default=util.ObjectStatus.NOTSET, compare=False)
     name: str = util.MANDATORY
     _parent: typing.Any = dc.field(default=util.MANDATORY, compare=False)
+    is_alternate: bool = False
 
     def __post_init__(self, coords=None):
         # set up log (VarlistEntryLoggerMixin)
@@ -211,10 +215,15 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
         if not self.path_variable:
             self.path_variable = self.name.upper() + _file_env_var_suffix
         # self.alternates is either [] or a list of nonempty lists of VEs
-        if self.alternates:
-            if not isinstance(self.alternates[0], list):
+        if hasattr(self, 'alternates'):
+            if not isinstance(self.alternates, list):
                 self.alternates = [self.alternates]
-            self.alternates = [vs for vs in self.alternates if vs]
+        else:
+            self.alternates = []
+        if self.requirement == VarlistEntryRequirement.ALTERNATE:
+            self.is_alternate = True
+        if hasattr(self, 'scalar_coords'):
+            self.scalar_coords = self.scalar_coords
 
     def dims(self):
         pass
@@ -253,7 +262,11 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
         """
         new_kw = global_settings_d.copy()
         new_kw['coords'] = []
-
+        new_kw['convention'] = parent.pod_settings.get('convention', 'cmip')
+        # check if realm is set for all variables
+        if parent.pod_data.get('realm', None) is not None:
+            new_kw['realm'] = parent.pod_data.get('realm')  # populated if realm defined in pod settings data instead
+        #  of an attribute for each POD variable
         if 'dimensions' not in kwargs:
             raise ValueError(f"No dimensions specified for Varlist entry {name}.")
         # validate: check for duplicate coord names
@@ -281,6 +294,7 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
                     raise ValueError((f"Unknown dimension name {d_name} in varlist "
                                       f"entry for {name}."))
                 new_kw['coords'].append(dims_d[d_name].make_scalar(scalar_val))
+
         filter_kw = util.filter_dataclass(kwargs, cls, init=True)
         obj = cls(name=name, _parent=parent, **new_kw, **filter_kw)
         # specialize time coord
@@ -319,11 +333,17 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
             "realm": self.realm,
             **assoc_dict
         })
+
         for ax, dim in self.dim_axes.items():
-            trans_dim = self.translation.dim_axes[ax]
-            self.env_vars[dim.name + _coord_env_var_suffix] = trans_dim.name
-            if trans_dim.has_bounds:
-                self.env_vars[dim.name + _coord_bounds_env_var_suffix] = trans_dim.bounds
+            if self.translation is not None:
+                trans_dim = self.translation.axes[ax]
+                self.env_vars[dim.name + _coord_env_var_suffix] = trans_dim.name
+                if trans_dim.has_bounds:
+                    self.env_vars[dim.name + _coord_bounds_env_var_suffix] = trans_dim.bounds
+            else:
+                self.env_vars[dim.name + _coord_env_var_suffix] = dim.name
+                if dim.has_bounds:
+                    self.env_vars[dim.name + _coord_bounds_env_var_suffix] = dim.bounds
 
     def iter_alternates(self):
         """Breadth-first traversal of "sets" of alternate VarlistEntries,
@@ -385,7 +405,7 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
         return s
 
     def iter_associated_files_keys(self, status=None, status_neq=None):
-        """Yield :class:`~data_manager.DataKeyBase`\s
+        """ Yield file key
         from v's *associated_files* dict, filtering out those DataKeys
         that have beeneliminated via previous failures in fetching or preprocessing.
         """
@@ -397,7 +417,7 @@ class VarlistEntry(VarlistEntryBase, util.MDTFObjectBase, data_model.DMVariable,
         yield from list(iter_)
 
     def iter_data_keys(self, status=None, status_neq=None):
-        """Yield :class:`~data_manager.DataKeyBase`\s
+        """Yield data key
         from v's *data* dict, filtering out those DataKeys that have been
         eliminated via previous failures in fetching or preprocessing.
         """
@@ -496,6 +516,8 @@ class Varlist(data_model.DMDataSet):
         single POD for multiple cases/ensemble members
     """
 
+    vlist_vars: dict
+
     def find_var(self, v):
         """If a variable matching *v* is already present in the Varlist, return
         (a reference to) it (so that we don't try to add duplicates), otherwise
@@ -510,16 +532,19 @@ class Varlist(data_model.DMDataSet):
                   model_paths: util.ModelDataPathManager,
                   case_name: str,
                   v: VarlistEntry,
-                  data_convention: str,
+                  from_convention: str,
+                  to_convention: str,
                   date_range: util.DateRange):
         """Update VarlistEntry fields with information that only becomes
         available after DataManager and Diagnostic have been configured (ie,
         only known at runtime, not from settings.jsonc.)
 
-        Could arguably be moved into VarlistEntry's init, at the cost of
-        dependency inversion.
         """
-        translate = translation.VariableTranslator().get_convention(data_convention)
+        # Note: VariableTranslator object is instantiated in mdtf_framework with runtime information from the POD
+        # settings file
+
+        # instantiate a translation object for the Data convention
+        translate = translation.VariableTranslator().get_convention(to_convention)
         if v.T is not None:
             v.change_coord(
                 'T',
@@ -534,13 +559,15 @@ class Varlist(data_model.DMDataSet):
             )
         v.dest_path = self.variable_dest_path(model_paths, case_name, v)
         try:
-            trans_v = translate.translate(v)
+            trans_v = translate.translate(v, from_convention)
+            if trans_v is None:
+                v.log.error(f'translation for varlistEntry {v.name} failed')
             v.translation = trans_v
             # copy preferred gfdl post-processing component during translation
             if hasattr(trans_v, "component"):
                 v.component = trans_v.component
         except KeyError as exc:
-            # can happen in normal operation (eg. precip flux vs. rate)
+            # can happen in normal operation (e.g., precip flux vs. rate)
             chained_exc = util.PodConfigEvent((f"Deactivating {v.full_name} due to "
                                                f"variable name translation: {str(exc)}."))
             # store but don't deactivate, because preprocessor.edit_request()
@@ -552,8 +579,30 @@ class Varlist(data_model.DMDataSet):
             # store but don't deactivate, because preprocessor.edit_request()
             # may supply alternate variables
             v.log.store_exception(chained_exc)
-        # set the VarlistEntry env_vars (required for backwards compatibility with first-gen PODs)
+
+        # set the VarlistEntry env_vars (required for backwards compatibility with first-gen PODs
         v.set_env_vars()
+        # Translate alternate vars if necessary
+        for alt_v in v.alternates:
+            if alt_v.T is not None:
+                alt_v.change_coord(
+                    'T',
+                    new_class={
+                        'self': VarlistTimeCoordinate,
+                        'range': util.DateRange,
+                        'frequency': util.DateFrequency
+                    },
+                    range=date_range,
+                    calendar=util.NOTSET,
+                    units=util.NOTSET
+                )
+            alt_v.dest_path = self.variable_dest_path(model_paths, case_name, alt_v)
+            trans_alt = translate.translate(alt_v, from_convention)
+            alt_v.translation = trans_alt
+            if trans_alt is None:
+                alt_v.info(f'Note: alternate variable {alt_v.full_name} not translated from {from_convention} to'
+                           f' {to_convention}')
+            alt_v.set_env_vars()
 
     def variable_dest_path(self,
                            model_paths: util.ModelDataPathManager,
@@ -572,7 +621,7 @@ class Varlist(data_model.DMDataSet):
             return os.path.join(model_paths.MODEL_WORK_DIR[case_name], freq, f_name)
 
     @classmethod
-    def from_struct(cls, parent):
+    def from_struct(cls, parent, append_vars: bool=False):
         """Parse the "dimensions", "data" and "varlist" sections of the POD's
         settings.jsonc file when instantiating a new :class:`Diagnostic` object.
 
@@ -600,31 +649,43 @@ class Varlist(data_model.DMDataSet):
             except Exception:
                 raise ValueError(f"Couldn't parse dimension entry for {name}: {dd}")
 
-        def _iter_shallow_alternates(var):
-            """Iterator over all VarlistEntries referenced as alternates. Doesn't
-            traverse alternates of alternates, etc.
-            """
-            for alt_vs in var.alternates:
-                yield from alt_vs
-
         vlist_settings = util.coerce_to_dataclass(
             parent.pod_data, VarlistSettings)
         globals_d = vlist_settings.global_settings
         dims_d = {k: _pod_dimension_from_struct(k, v, vlist_settings)
                   for k, v in parent.pod_dims.items()}
 
-        vlist_vars = {
+        verify_axes = True
+        if not append_vars:
+            cls.vlist_vars = dict()
+        else:
+             verify_axes = False
+
+        cls.vlist_vars.update({
             k: VarlistEntry.from_struct(globals_d, dims_d, name=k, parent=parent, **v)
-            for k, v in parent.pod_vars.items()
-        }
-        for v in vlist_vars.values():
+            for k, v in parent.pod_vars.items()}
+        )
+
+        alt_vars = []
+        for k, v in parent.pod_vars.items():
+            for vv in v.values():
+                if vv == 'alternate':
+                    alt_vars.append(k)
+        vvars = tuple(parent.pod_vars.keys())
+        for k, v in parent.pod_vars.items():
             # validate & replace names of alt vars with references to VE objects
-            for altv_name in _iter_shallow_alternates(v):
-                if altv_name not in vlist_vars:
-                    raise ValueError((f"Unknown variable name {altv_name} listed "
-                                      f"in alternates for varlist entry {v.name}."))
-            linked_alts = []
-            for alts in v.alternates:
-                linked_alts.append([vlist_vars[v_name] for v_name in alts])
-            v.alternates = linked_alts
-        return cls(contents=list(vlist_vars.values()))
+            if v.get('alternates', None) is not None:
+                for altv_name in v.get('alternates'):
+                    if altv_name not in vvars:
+                        raise ValueError((f"Unknown variable name {altv_name} listed "
+                                          f"in alternates for varlist entry {v.name}."))
+                linked_alts = [cls.vlist_vars[v_name] for v_name in alt_vars]
+                cls.vlist_vars[k].alternates = linked_alts
+        for a in alt_vars:
+            cls.vlist_vars = util.new_dict_wo_key(cls.vlist_vars, a)
+
+        # remove alternates from VarlistEntries since they are now attributes of variable
+        # VarlistEntry objects that they can be substituted for
+
+        args_list = list(cls.vlist_vars.values())
+        return cls(verify_axes=verify_axes, contents=args_list)

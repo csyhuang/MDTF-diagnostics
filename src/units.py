@@ -2,8 +2,7 @@
 `cfunits <https://ncas-cms.github.io/cfunits/index.html>`__ library.
 """
 import cfunits
-from src import util
-
+import re
 import logging
 
 _log = logging.getLogger(__name__)
@@ -107,7 +106,7 @@ def units_equal(*args, rtol=None):
     """Returns True if and only if all unit-ful quantities in *args* are strictly
     equal (:func:`units_equivalent` is True and :func:`conversion_factor` = 1).
 
-    .. note::
+    . note::
        rtol, atol tolerances on floating-point equality are not currently
        implemented in cfunits, so we use :func:`relative_tol`.
 
@@ -136,17 +135,19 @@ def conversion_factor(source_unit, dest_unit):
     *source_unit*, *dest_unit* are coerced to :class:`Units` objects via
     :func:`to_cfunits`.
     """
+    if str(source_unit) == str(dest_unit):
+        return 1.0 # bypass function if the units have the same string allowing units like '0-1' to be used
     source_unit, dest_unit = to_equivalent_units(source_unit, dest_unit)
     return Units.conform(1.0, source_unit, dest_unit)
 
 
 # --------------------------------------------------------------------
 
-def convert_scalar_coord(coord, dest_units, log=_log):
+def convert_scalar_coord(coord, dest_units: str, log=_log):
     """Given scalar coordinate *coord*, return the appropriate scalar value in
     new units *dest_units*.
     """
-    assert hasattr(coord, 'is_scalar') and coord.is_scalar
+    assert hasattr(coord, 'is_scalar') and coord.is_scalar, 'coord is missing is_scalar attribute or is_scalar = False'
     if not units_equal(coord.units, dest_units):
         # convert units of scalar value to convention's coordinate's units
         dest_value = coord.value * conversion_factor(coord.units, dest_units)
@@ -163,7 +164,7 @@ def convert_scalar_coord(coord, dest_units, log=_log):
     return dest_value
 
 
-def convert_dataarray(ds, da_name, src_unit=None, dest_unit=None, log=_log):
+def convert_dataarray(ds, da_name: str, src_unit=None, dest_unit=None, log=_log):
     """Wrapper for cfunits `conform()
     <https://ncas-cms.github.io/cfunits/generated/cfunits.Units.conform.html#cfunits.Units.conform>`__
     that does unit conversion in-place on a member of an xarray Dataset,
@@ -171,7 +172,7 @@ def convert_dataarray(ds, da_name, src_unit=None, dest_unit=None, log=_log):
 
     Args:
         ds (Dataset): xarray Dataset containing the DataArray to convert.
-        da_name (str): Name of the DataArray to do the unit conversion on.
+        da_name (str): variable name or standard_name of the associated DataArray to do the unit conversion on.
         src_unit: Current units of *da_name*. Coerced to a :class:`Units` object
             via :func:`to_cfunits`. Optional; if not given this is populated from
             the ``units`` attribute of *da_name*, if it exists.
@@ -187,22 +188,51 @@ def convert_dataarray(ds, da_name, src_unit=None, dest_unit=None, log=_log):
         Dataset *ds*, with *da_name* modified in-place.
     """
     da = ds.get(da_name, None)
+
+
+    search_attrs = ['standard_name', 'long_name']
     if da is None:
-        raise ValueError(f"convert_dataarray: '{da_name}' not found in dataset.")
+        # search attributes for standard_name or long_name that matches input name
+        ds_vars = [ds.variables, ds.coords.variables]
+        merged = frozenset().union(*ds_vars)
+        # try to find exact matches to input name in standard_name and long_name attributes
+        for var in merged:
+            dset = ds.get(var)
+            for attr in search_attrs:
+                att = dset.attrs.get(attr, None)
+                if isinstance(att, str):
+                    if att == da_name:
+                        da = dset
+                        da_name = var
+                        break
+    if da is None:
+        log.warning(f"units.convert_dataarray: standard_name attribute '{da_name}' not found in dataset. "
+                    f"Skipping the unit conversion for the variable/coordinate associated with {da_name}")
+        return ds
     if src_unit is None:
         try:
             src_unit = da.attrs['units']
         except KeyError:
             raise TypeError((f"convert_dataarray: 'units' attribute not defined "
-                             f"on {da.name}."))
+                             f"on {da_name}."))
     if dest_unit is None:
         raise TypeError((f"convert_dataarray: dest_unit not given for unit "
-                         "conversion on {da.name}."))
-
+                         "conversion on {da_name}."))
+    std_name = ""
+    # update standard_name entry to long_name if it is undefined
     if 'standard_name' in da.attrs:
-        std_name = f" ({da.attrs['standard_name']})"
-    else:
-        std_name = ""
+        if isinstance(da.attrs['standard_name'], str):
+            std_name = f"{da.attrs['standard_name']}"
+        elif 'long_name' in da.attrs:
+            std_name = f"{da.attrs['long_name']}"
+            ds[da_name].attrs['standard_name'] = std_name.replace(' ', '_')
+
+    # udunits does not recognize mb == hPa, so hardcode correction
+    if src_unit == 'mb':
+        ds[da_name].attrs['units'] = 'hPa'
+        src_unit = 'hPa'
+    if dest_unit == 'mb':
+        dest_unit = 'hPa'
     if units_equal(src_unit, dest_unit):
         log.debug(("Source, dest units of '%s'%s identical (%s); no conversion "
                    "done."), da.name, std_name, dest_unit)

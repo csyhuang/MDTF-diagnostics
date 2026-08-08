@@ -14,19 +14,19 @@
     },
     "$ref": "./cmip6-cmor-tables/Tables/CMIP6_coordinate.json"
    },
-  "aux_coords": {
+  "variables" : {
     "deptho": {
       "standard_name": "sea_floor_depth_below_geoid",
       "units": "m",
+      "realm": "ocean",
       "ndim": 2
     },
     "thkcello": {
       "standard_name": "cell_thickness",
       "units": "m",
+      "realm": "ocean",
       "ndim": 3
-    }
-  },
-  "variables" : {
+    },
     "ua": {
       "standard_name": "eastward_wind",
       "realm": "atmos",
@@ -181,6 +181,14 @@
       "standard_name": "precipitation_flux",
       "realm": "atmos",
       "units": "kg m-2 s-1",
+      "alternate_standard_names": ["rainfall_flux"],
+      "ndim": 3
+    },
+    "rainfall_flux": {
+      "standard_name": "rainfall_flux",
+      "realm": "seaIce",
+      "units": "kg m-2 s-1",
+      "alternate_standard_names": ["precipitation_flux"],
       "ndim": 3
     },
     "prc": {
@@ -240,6 +248,7 @@
     },
     "tos": {
       "standard_name": "sea_surface_temperature",
+      "realm": "ocean",
       "units": "degC",
       "ndim": 3
     },
@@ -248,11 +257,6 @@
       "realm": "atmos",
       "units": "m s-1",
       "modifier": "atmos_height",
-      "ndim": 3
-    },
-    "tos": {
-      "standard_name": "sea_surface_temperature",
-      "units": "K",
       "ndim": 3
     },
     // radiative fluxes:
@@ -266,6 +270,7 @@
       "standard_name": "surface_downwelling_shortwave_flux_in_air",
       "realm": "atmos",
       "units": "W m-2",
+      "alternate_standard_names": ["downwelling_shortwave_flux_in_sea_water"],
       "ndim": 3
     },
     "rsdt": {
@@ -409,6 +414,12 @@
       "realm": "land",
       "units": "kg m-2",
       "ndim": 3
+    },
+    "sftlf": {
+      "standard_name": "land_area_fraction",
+      "realm": "land",
+      "units": "%",
+      "ndim": 2
     },
     "evspsbl": {
       "standard_name": "water_evapotranspiration_flux",

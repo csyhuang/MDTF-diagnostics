@@ -1,6 +1,8 @@
 Running Submodules
 ===============================
-Functions from external packages can be called by MDTF with their inclusion in the json or yml file supplied to the framework.
+.. _ref-submodules:
+Functions from external packages can be called by MDTF with their inclusion in the json or yml file supplied to the
+framework.
 
 Inclusion in JSON file
 ------------------------------
@@ -22,11 +24,13 @@ The following block in your JSON or yml file is required for the submodule to la
        }
    },
 
-Where, ${MODULE_NAME} is the name for the package you want to launch a function from, ${FUNCTION_NAME} is the function you want to call, and ${FUNCTION_ARGS} is the arguments to be passed to the function.
+Where, ${MODULE_NAME} is the name for the package you want to launch a function from, ${FUNCTION_NAME} is the
+function you want to call, and ${FUNCTION_ARGS} is the arguments to be passed to the function.
 
 TempestExtremes Example
 ------------------------
-As an example, we will build and run TempestExtremes (TE) from MDTF. First, clone the latest TE with a python wrapper. As of writing, this can be found 'here <https://github.com/amberchen122/tempestextremes/>'_
+As an example, we will build and run TempestExtremes (TE) from MDTF. First, clone the latest TE with a python wrapper.
+See the`tempestExtremes example <https://github.com/amberchen122/tempestextremes/>`__
 In the cloned directory, it can be built using the commands:
 
 .. code-block::
@@ -60,4 +64,5 @@ Now, in our JSON file we can call the function DetectNodes by including the foll
        }
    },
 
-Multiple packages can be ran if they are nested in "module_list". Multiple functions can be called or even the same one again.
+Multiple packages can be ran if they are nested in "module_list". Multiple functions can be called or even the same one
+again.

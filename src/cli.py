@@ -108,24 +108,28 @@ def check_date_format(date_string: str):
         Credit: https://stackoverflow.com/questions/23581128/how-to-format-date-string-via-multiple-formats-in-python
     """
 
-    for fmt in ('%Y-%m-%d', '%Y-%m-%d:%H:%M:%S', '%Y%m%d:%H%M%S', '%Y-%m-%d:%H-%M-%S', '%Y%m%d', '%Y%m%d%H%M%S'):
+    for fmt in ('%Y', '%Y%m', '%Y-%m', '%Y%m%d',
+                '%Y-%m-%d', '%Y-%m-%d:%H:%M:%S', '%Y%m%d:%H%M%S',
+                '%Y-%m-%d:%H-%M-%S', '%Y%m%d%H%M%S'):
         try:
             return datetime.strptime(date_string, fmt)
         except ValueError:
             pass
     raise util.exceptions.MDTFBaseException(
-                f"Input date string {date_string} does not match accepted formats: YYYY-mm-dd, YYYYmmdd,"
+                f"Input date string {date_string} does not match accepted formats: YYYY, YYYYmm,"
+                f" YYYY-mm, YYYY-mm-dd, YYYYmmdd,"
                 f"YYYYmmdd:HHMMSS, YYYY-mm-dd:HH:MM:SS, YYYY-mm-dd:HH-MM-SS"
             )
 
 
 def verify_case_atts(case_list: util.NameSpace):
     # required case attributes
-    case_attrs = ['convention', 'startdate', 'enddate']
-    conventions = ['cmip', 'gfdl', 'cesm']
+    required_case_attrs = {'convention', 'startdate', 'enddate'}
+    optional_case_attrs = {'realm', 'model'}
+    conventions = {'cmip', 'gfdl', 'cesm'}
     for name, att_dict in case_list.items():
         try:
-            all(att in att_dict.keys() for att in case_attrs)
+            all(att in att_dict.keys() for att in required_case_attrs)
         except KeyError:
             raise util.exceptions.MDTFBaseException(
                 f"Missing or incorrect convention, startdate, or enddate for case {name}"
@@ -136,6 +140,11 @@ def verify_case_atts(case_list: util.NameSpace):
             raise util.exceptions.MDTFBaseException(
                 f"Convention {att_dict['convention']} not supported"
             )
+        try:
+            {att for att in att_dict.keys()}.issubset(required_case_attrs.union(optional_case_attrs))
+        except KeyError:
+            raise util.exceptions.MDTFBaseException(f"Runtime case attribute is not a required or optional attribute. Check runtime config file for typo or unsupported entry.")
+
         st = check_date_format(att_dict.startdate)
         en = check_date_format(att_dict.enddate)
 
@@ -158,3 +167,25 @@ def verify_runtime_config_options(config: util.NameSpace):
         new_output_dir = verify_dirpath(config.OUTPUT_DIR, config.CODE_ROOT)
         update_config(config, 'OUTPUT_DIR', new_output_dir)
     verify_case_atts(config.case_list)
+
+def verify_conda_envs(config: util.NameSpace, filename: str):
+    m_exists = os.path.exists(config['micromamba_exe'])
+    c_exists = os.path.exists(config['conda_root'])
+    cenv_exists = os.path.exists(config['conda_env_root'])
+    if not m_exists and not c_exists:
+        raise util.exceptions.MDTFBaseException(
+            f"Could not find conda or micromamba executable; please check the runtime config file: "
+            f'{filename}'
+        ) 
+    if c_exists and not cenv_exists:
+        new_env_root = os.path.join(config['conda_root'], "envs")
+        if os.path.exists(new_env_root):
+            config.update({'conda_env_root':new_env_root})
+        else:
+            raise util.exceptions.MDTFBaseException(
+                f"Count not find conda enviroment directory; please check the runtime config file: "
+                f'{filename}'
+            )
+
+    return config
+

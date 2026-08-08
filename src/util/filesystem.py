@@ -130,7 +130,7 @@ def check_executable(exec_name: str) -> bool:
     return find_executable(exec_name) is not None
 
 
-def find_files(src_dirs: tuple[str, list], filename_globs: tuple[str, list], n_files=None) -> list:
+def find_files(src_dirs: str | list, filename_globs: str | list, n_files=None) -> list:
     """Return list of files in *src_dirs*, or any subdirectories, matching any
     of *filename_globs*. Wraps Python :py:class:`glob.glob`.
 
@@ -347,16 +347,13 @@ def append_html_template(template_file: str, target_file: str, template_dict: di
         html_str = _DoubleBraceTemplate(html_str).safe_substitute(template_dict)
     if not os.path.exists(target_file):
         if create:
-            # print("\tDEBUG: write {} to new {}".format(template_file, target_file))
             mode = 'w'
         else:
             raise OSError("Can't find {}".format(target_file))
     else:
         if append:
-            # print("\tDEBUG: append {} to {}".format(template_file, target_file))
             mode = 'a'
         else:
-            # print("\tDEBUG: overwrite {} with {}".format(target_file, template_file))
             os.remove(target_file)
             mode = 'w'
     with io.open(target_file, mode, encoding='utf-8') as f:
@@ -378,6 +375,8 @@ class TempDirManager:
             temp_root = tempfile.gettempdir()
         else:
             temp_root = config.TEMP_DIR_ROOT
+            if config.CODE_ROOT not in temp_root:
+                temp_root = os.path.join(config.CODE_ROOT, temp_root)
         if not self._unittest:
             assert os.path.isdir(temp_root), "Could not find temp_root directory"
         self._root = temp_root
@@ -415,7 +414,7 @@ class TempDirManager:
             for d in self._dirs:
                 self.rm_tempdir(d)
 
-    def tempdir_cleanup_handler(self, frame=None, signum=None):
+    def tempdir_cleanup_handler(self, signum=None):
         # delete temp files
-        signal_logger(self.__class__.__name__, signum, frame, log=_log)
+        signal_logger(self.__class__.__name__, signum, log=_log)
         self.cleanup()
