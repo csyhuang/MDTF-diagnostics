@@ -16,8 +16,8 @@ case_list:
   "mdtf_timeslice_v4.ne120L58.001" :
     model: "CESM"
     convention: "CESM"
-    startdate: "20010101060000"
-    enddate: "20021231060000"
+    startdate: "20010101030000"
+    enddate: "20021231210000"
     realm: "atmos"
     frequency: ""
 
