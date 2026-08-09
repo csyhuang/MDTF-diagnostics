@@ -26,6 +26,15 @@
 #   ./run_supervised.sh status                        # progress summary
 #   ./run_supervised.sh stop                          # stop after current chunk
 #
+# Logs, all under LOG_DIR (default ./regrid_logs):
+#
+#   run_supervised_output.log   everything this script prints, including
+#                               bash-level errors. Written regardless of how
+#                               the script is redirected, so
+#                               `nohup ... > /dev/null 2>&1 &` loses nothing.
+#   regrid_<VAR>.log            full regrid + NCO output for that variable,
+#                               appended across restarts.
+#
 # Environment (all optional):
 #   VARS="T U V"          variables to process, in order
 #   PARALLEL=1            run the variables concurrently (see the note below)
@@ -46,10 +55,14 @@ PYTHON="${PYTHON:-python3}"
 
 STOP_FILE="${LOG_DIR}/STOP"
 PID_FILE="${LOG_DIR}/supervisor.pid"
+OUTPUT_LOG="${LOG_DIR}/run_supervised_output.log"
 
 mkdir -p "$LOG_DIR"
 
-log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "${LOG_DIR}/supervisor.log"; }
+# Unbuffered so `tail -f` shows the line as it happens rather than when a
+# block fills -- on a job whose steps take tens of minutes, a stale log looks
+# indistinguishable from a hung run.
+log() { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 
 # Where the finished chunks land. Ask the package rather than guessing, so this
 # stays correct whatever combination of environment variables is in play.
@@ -99,7 +112,8 @@ cmd_status() {
         printf '%-6s %8s  %s\n' "$var" "$n" "${newest:-none}"
     done
     echo
-    tail -5 "${LOG_DIR}/supervisor.log" 2>/dev/null
+    echo "--- last lines of ${OUTPUT_LOG} ---"
+    tail -5 "$OUTPUT_LOG" 2>/dev/null
 }
 
 cmd_stop() {
@@ -151,7 +165,7 @@ run_variable() {
             if [[ $stalled -ge $MAX_STALLED_RETRIES ]]; then
                 log "$var: ABANDONED after $stalled attempts without progress"
                 log "$var: last 15 lines of its log:"
-                tail -15 "${LOG_DIR}/regrid_${var}.log" | tee -a "${LOG_DIR}/supervisor.log"
+                tail -15 "${LOG_DIR}/regrid_${var}.log"
                 return 1
             fi
         fi
@@ -167,6 +181,16 @@ main() {
         run)    ;;
         *)      echo "usage: $0 [run|status|stop]" >&2; exit 1 ;;
     esac
+
+    # Everything from here on -- supervisor messages, bash-level errors, the
+    # trap message -- goes to OUTPUT_LOG, so `nohup ... > /dev/null 2>&1 &`
+    # still leaves a complete record. When attached to a terminal it is teed so
+    # you can watch it as well.
+    if [[ -t 1 ]]; then
+        exec > >(tee -a "$OUTPUT_LOG") 2>&1
+    else
+        exec >> "$OUTPUT_LOG" 2>&1
+    fi
 
     rm -f "$STOP_FILE"
     echo $$ > "$PID_FILE"
