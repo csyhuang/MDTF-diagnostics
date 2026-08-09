@@ -47,7 +47,7 @@ class LatLonMapPlotter(object):
         self._lon_range = lon_range
         self._lat_range = lat_range
 
-    def plot_and_save_variable(self, variable, cmap, var_title_str, save_path, num_level=30):
+    def plot_and_save_variable(self, variable, cmap, var_title_str, save_path=None, num_level=30):
         fig = plt.figure(figsize=self._figsize)
         spec = gridspec.GridSpec(
             ncols=1, nrows=1, wspace=0.3, hspace=0.3)
@@ -64,9 +64,15 @@ class LatLonMapPlotter(object):
         ax.set_yticks(self._lat_range, crs=ccrs.PlateCarree())
         fig.colorbar(main_fig, ax=ax)
         ax.set_title(f"{self._title_str}\n{var_title_str}")
-        plt.savefig(save_path, bbox_inches='tight')
-        # plt.savefig(save_path.replace("/PS/", "/").replace(".eps", ".png"), bbox_inches='tight')  # Do I need this?
-        plt.show()
+        # save_path=None: used by the notebook driver, which displays the figure
+        # inline instead of writing EPS for the framework to convert.
+        if save_path is not None:
+            plt.savefig(save_path, bbox_inches='tight')
+        # Returning the figure lets a caller display or further annotate it.
+        # plt.show() is deliberately NOT called here: under nbconvert it would
+        # close the figure before the notebook could render it, and headless it
+        # is a no-op that only costs time.
+        return fig
 
 
 class HeightLatPlotter(object):
@@ -78,7 +84,7 @@ class HeightLatPlotter(object):
         self._cmap = cmap
         self._xlim = xlim  # [-80, 80]
 
-    def plot_and_save_variable(self, variable, cmap, var_title_str, save_path, num_level=30):
+    def plot_and_save_variable(self, variable, cmap, var_title_str, save_path=None, num_level=30):
         fig = plt.figure(figsize=self._figsize)
         spec = gridspec.GridSpec(ncols=1, nrows=1)
         ax = fig.add_subplot(spec[0])
@@ -93,9 +99,9 @@ class HeightLatPlotter(object):
         ax.set_title(f"{self._title_str}\n{var_title_str}")
         ax.set_xlim(self._xlim)
         plt.tight_layout()
-        plt.savefig(save_path, bbox_inches='tight')
-        # plt.savefig(save_path.replace("/PS/", "/").replace(".eps", ".png"), bbox_inches='tight')  # Do I need this?
-        plt.show()
+        if save_path is not None:
+            plt.savefig(save_path, bbox_inches='tight')
+        return fig
 
 
 def convert_pseudoheight_to_hPa(height_array):

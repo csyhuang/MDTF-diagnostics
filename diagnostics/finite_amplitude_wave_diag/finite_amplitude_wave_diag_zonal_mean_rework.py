@@ -1,4 +1,4 @@
-# Finite-amplitude Rossby wave POD -- streaming rework
+# Finite-amplitude Rossby wave POD -- streaming implementation
 # ================================================================================
 # Computes the same diagnostics as finite_amplitude_wave_diag_zonal_mean.py but
 # one timestep at a time, so that neither memory nor scratch disk scales with
@@ -28,19 +28,34 @@
 # $WORK_DIR/model/netCDF as the MDTF guidelines require (doc/sphinx/
 # dev_guidelines.rst:100).
 #
-# This file exists alongside the original so the two can be compared on the
-# same input. See compare_implementations.py.
+# ================================================================================
+# THIS FILE IS A MODULE, NOT THE DRIVER.
+#
+# The POD's driver is finite_amplitude_wave_diag_zonal_mean.ipynb, which imports
+# from here and displays the figures inline. Everything below is written as
+# functions taking an explicit CaseContext rather than reading module globals,
+# so that the notebook, the test harness and `python -m` all drive the same code
+# rather than three copies of it.
+#
+#   python finite_amplitude_wave_diag_zonal_mean_rework.py   # run standalone
+#
+# from the notebook:
+#   ctx = load_case()
+#   season = process_season(ctx, "DJF", [1, 2, 12])
+#   plot_season(ctx, season, plot_dir)
 # ================================================================================
 #   - PI: Clare S. Y. Huang. The University of Chicago. csyhuang@uchicago.edu.
 #   - Other contributors: Christopher Polster (JGU Mainz), Noboru Nakamura (UChicago)
 #   The MDTF framework is distributed under the LGPLv3 license (see LICENSE.txt).
 # ================================================================================
+from __future__ import annotations
+
 import gc
 import os
 from collections import namedtuple
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-import matplotlib
 import intake
 import numpy as np
 import xarray as xr
@@ -50,140 +65,228 @@ from falwa.oopinterface import QGFieldNH18
 from finite_amplitude_wave_diag_utils import gridfill_each_level, infer_vertical_grid, \
     save_seasonal_diagnostics, LatLonMapPlotter, HeightLatPlotter
 
-matplotlib.use('Agg')  # non-X windows backend; the framework always runs headless
+#: Must match the frequency requested in settings.jsonc.
+FREQUENCY = "6hr"
 
-frequency = "6hr"  # must match the frequency requested in settings.jsonc
-
-# Pseudoheight spacing requested when the input is NOT already on an evenly
-# spaced pseudoheight grid. Ignored when it is: falwa then takes dz from the
-# data. See infer_vertical_grid.
+#: Pseudoheight spacing requested when the input is NOT already on an evenly
+#: spaced pseudoheight grid. Ignored when it is: falwa then takes dz from the
+#: data. See infer_vertical_grid.
 TARGET_DZ = 1000.0
 
-# Write a checkpoint every this many timesteps. Sized by how much recomputation
-# is acceptable after a crash, not by memory -- the accumulated diagnostics are
-# ~1.2 MiB per timestep. Set to 0 to disable checkpointing entirely.
+#: Write a checkpoint every this many timesteps. Sized by how much recomputation
+#: is acceptable after a crash, not by memory -- the accumulated diagnostics are
+#: ~1.2 MiB per timestep. 0 disables checkpointing.
 CHECKPOINT_EVERY = int(os.environ.get("FAWD_CHECKPOINT_EVERY", "100"))
 
-# *** Regular analysis grid defined by developer ***
-xlon = np.arange(0, 360, 1.0)
-ylat = np.arange(-90, 91, 1.0)
+#: Seasons and the calendar months belonging to each.
+SEASON_TO_MONTHS = [
+    ("DJF", [1, 2, 12]), ("MAM", [3, 4, 5]),
+    ("JJA", [6, 7, 8]), ("SON", [9, 10, 11])]
+
+#: Regular analysis grid defined by the developer. falwa works on this grid;
+#: results are mapped back onto the input grid before averaging.
+XLON = np.arange(0, 360, 1.0)
+YLAT = np.arange(-90, 91, 1.0)
+
+#: The five diagnostics retained per timestep.
+TimestepResult = namedtuple(
+    "TimestepResult",
+    ["uref", "zonal_mean_u", "zonal_mean_lwa", "lwa_baro", "u_baro"])
+
+SeasonalAverage = namedtuple(
+    "SeasonalAverage", [
+        "zonal_mean_u", "uref", "zonal_mean_lwa",
+        "lwa_baro", "u_baro", "covariance_lwa_u_baro"])
+
+
+@dataclass
+class CaseContext:
+    """Everything resolved from the framework hand-off, passed explicitly.
+
+    Held in one object rather than as module globals so that the notebook can
+    build it, inspect it, and hand it to the same functions the standalone run
+    uses.
+    """
+    wk_dir: str
+    casename: str
+    catalog_file: str
+    model_dataset: xr.Dataset
+    u_var_name: str
+    v_var_name: str
+    t_var_name: str
+    time_coord_name: str
+    plev_name: str
+    lat_name: str
+    lon_name: str
+    original_grid: Dict[str, xr.DataArray]
+    firstyr: int
+    lastyr: int
+    catalog: object = None       # the intake datastore, handy in a notebook
+
+    @property
+    def plot_dir(self) -> str:
+        return os.path.join(self.wk_dir, "model", "PS") + os.sep
+
+    @property
+    def netcdf_dir(self) -> str:
+        return os.path.join(self.wk_dir, "model", "netCDF")
+
+    def title_for(self, season: str) -> str:
+        return f"{self.casename} ({self.firstyr}-{self.lastyr}) {season}"
+
+
+@dataclass
+class SeasonResult:
+    """One season's per-timestep diagnostics and their average."""
+    season: str
+    n_time: int
+    results: List[TimestepResult]
+    seasonal_average: Optional[SeasonalAverage]
+    yz_mask: Optional[np.ndarray]
+    xy_mask: Optional[np.ndarray]
+    analysis_height_array: Optional[np.ndarray]
+    dz: float
+    kmax: int
+    on_even_grid: bool
+    skipped: bool = False
+
 
 # ================================================================================
-# 1) Framework hand-off. Identical to the original driver; see its comments and
-#    doc/sphinx/ref_envvars.rst.
+# 1) Framework hand-off
 # ================================================================================
-wk_dir = os.environ["WORK_DIR"]
-case_env_file = os.environ["case_env_file"]
-assert os.path.isfile(case_env_file), f"case environment file not found: {case_env_file}"
-with open(case_env_file, 'r') as stream:
-    case_info = yaml.safe_load(stream)
 
-cat_def_file = case_info['CATALOG_FILE']
-case_list = case_info['CASE_LIST']
-casename = list(case_list.keys())[0]
-case_attrs = case_list[casename]
-if len(case_list) > 1:
-    print(f"WARNING: {len(case_list)} cases supplied; this POD analyses one. Using {casename}.")
+def load_case(wk_dir: Optional[str] = None,
+              case_env_file: Optional[str] = None,
+              frequency: str = FREQUENCY) -> CaseContext:
+    """Resolve the framework hand-off into a CaseContext.
 
-u_var_name = case_attrs.get('ua_var', 'ua')
-v_var_name = case_attrs.get('va_var', 'va')
-t_var_name = case_attrs.get('ta_var', 'ta')
-time_coord_name = case_attrs.get('time_coord', 'time')
-plev_name = case_attrs.get('plev_coord', 'plev')
-lat_name = case_attrs.get('lat_coord', 'lat')
-lon_name = case_attrs.get('lon_coord', 'lon')
+    The framework passes the POD its inputs through case_info.yml, whose
+    location is in the `case_env_file` environment variable. That file holds the
+    postprocessed data catalog and, per case, the model's own names for each
+    variable and coordinate. See doc/sphinx/ref_envvars.rst and
+    case_info_example.yml.
+    """
+    wk_dir = wk_dir or os.environ["WORK_DIR"]
+    case_env_file = case_env_file or os.environ["case_env_file"]
+    if not os.path.isfile(case_env_file):
+        raise FileNotFoundError(f"case environment file not found: {case_env_file}")
 
-cat = intake.open_esm_datastore(cat_def_file)
-cat_subset = cat.search(
-    variable_id=[u_var_name, v_var_name, t_var_name], frequency=frequency)
-if cat_subset.df.empty:
-    raise ValueError(
-        f"No assets in {cat_def_file} for variables "
-        f"{[u_var_name, v_var_name, t_var_name]} at frequency '{frequency}'. "
-        f"Available variable_id: {sorted(cat.df['variable_id'].unique())}")
+    with open(case_env_file, "r") as stream:
+        case_info = yaml.safe_load(stream)
 
-dataset_dict = cat_subset.to_dataset_dict(
-    progressbar=False,
-    xarray_open_kwargs={"decode_times": True, "use_cftime": True})
-model_dataset = dataset_dict[list(dataset_dict)[0]]
+    catalog_file = case_info["CATALOG_FILE"]
+    case_list = case_info["CASE_LIST"]
+    casename = list(case_list.keys())[0]
+    case_attrs = case_list[casename]
+    if len(case_list) > 1:
+        print(f"WARNING: {len(case_list)} cases supplied; this POD analyses one. "
+              f"Using {casename}.")
 
-missing_vars = [v for v in (u_var_name, v_var_name, t_var_name) if v not in model_dataset]
-if missing_vars:
-    raise KeyError(f"{missing_vars} absent from the catalog query result. "
-                   f"Found {list(model_dataset.data_vars)}.")
+    u_var_name = case_attrs.get("ua_var", "ua")
+    v_var_name = case_attrs.get("va_var", "va")
+    t_var_name = case_attrs.get("ta_var", "ta")
+    time_coord_name = case_attrs.get("time_coord", "time")
+    plev_name = case_attrs.get("plev_coord", "plev")
+    lat_name = case_attrs.get("lat_coord", "lat")
+    lon_name = case_attrs.get("lon_coord", "lon")
 
-firstyr = model_dataset.coords[time_coord_name].values[0].year
-lastyr = model_dataset.coords[time_coord_name].values[-1].year
-if model_dataset[plev_name].units == 'Pa':
-    print("model_dataset[plev_name].units == 'Pa'. Convert it to hPa.")
-    model_dataset = model_dataset.assign_coords({plev_name: model_dataset[plev_name] / 100})
-    model_dataset[plev_name].attrs["units"] = 'hPa'
+    catalog = intake.open_esm_datastore(catalog_file)
+    subset = catalog.search(
+        variable_id=[u_var_name, v_var_name, t_var_name], frequency=frequency)
+    if subset.df.empty:
+        raise ValueError(
+            f"No assets in {catalog_file} for variables "
+            f"{[u_var_name, v_var_name, t_var_name]} at frequency '{frequency}'. "
+            f"Available variable_id: {sorted(catalog.df['variable_id'].unique())}")
 
-original_grid = {
-    time_coord_name: model_dataset.coords[time_coord_name],
-    plev_name: model_dataset.coords[plev_name],
-    lat_name: model_dataset.coords[lat_name],
-    lon_name: model_dataset.coords[lon_name]}
+    dataset_dict = subset.to_dataset_dict(
+        progressbar=False,
+        xarray_open_kwargs={"decode_times": True, "use_cftime": True})
+    model_dataset = dataset_dict[list(dataset_dict)[0]]
 
-print(f"""
-    wk_dir = {wk_dir}
-    casename = {casename}
-    variables = {u_var_name}, {v_var_name}, {t_var_name}
-    firstyr, lastyr = {firstyr}, {lastyr}
-    checkpoint every = {CHECKPOINT_EVERY} timestep(s)
-    """)
+    missing = [v for v in (u_var_name, v_var_name, t_var_name)
+               if v not in model_dataset]
+    if missing:
+        raise KeyError(f"{missing} absent from the catalog query result. "
+                       f"Found {list(model_dataset.data_vars)}.")
+
+    firstyr = model_dataset.coords[time_coord_name].values[0].year
+    lastyr = model_dataset.coords[time_coord_name].values[-1].year
+
+    if model_dataset[plev_name].units == "Pa":
+        # True division, not //. Floor division silently truncates any level
+        # that is not a whole number of hPa, and on a grid evenly spaced in
+        # pseudoheight that is most of them.
+        print("plev is in Pa; converting to hPa.")
+        model_dataset = model_dataset.assign_coords(
+            {plev_name: model_dataset[plev_name] / 100})
+        model_dataset[plev_name].attrs["units"] = "hPa"
+
+    return CaseContext(
+        wk_dir=wk_dir, casename=casename, catalog_file=catalog_file,
+        model_dataset=model_dataset,
+        u_var_name=u_var_name, v_var_name=v_var_name, t_var_name=t_var_name,
+        time_coord_name=time_coord_name, plev_name=plev_name,
+        lat_name=lat_name, lon_name=lon_name,
+        original_grid={
+            time_coord_name: model_dataset.coords[time_coord_name],
+            plev_name: model_dataset.coords[plev_name],
+            lat_name: model_dataset.coords[lat_name],
+            lon_name: model_dataset.coords[lon_name]},
+        firstyr=firstyr, lastyr=lastyr, catalog=catalog)
 
 
 # ================================================================================
 # 2) Per-timestep computation
 # ================================================================================
 
-#: The five diagnostics retained per timestep, and their dimensions once the
-#: analysis grid is mapped back onto the input grid.
-TimestepResult = namedtuple(
-    "TimestepResult",
-    ["uref", "zonal_mean_u", "zonal_mean_lwa", "lwa_baro", "u_baro"])
-
-
-def masks_for_timestep(u_slice: np.ndarray):
+def masks_for_timestep(u_slice: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """Missing-value masks for one timestep, in the same sense as the original.
 
     Returns ``(yz, xy)`` where *yz* is (plev, lat) -- any longitude missing at
     that level and latitude -- and *xy* is (lat, lon) -- any level above the
-    lowest missing at that column. OR-ing these across timesteps reproduces
-    what DataPreprocessor._do_save_mask computes in one pass over the season.
+    lowest missing at that column. OR-ing these across timesteps reproduces what
+    DataPreprocessor._do_save_mask computes in one pass over the season.
     """
     missing = np.isnan(u_slice)                     # (plev, lat, lon)
-    yz = missing.any(axis=-1)                       # (plev, lat)
-    xy = missing[1:, :, :].any(axis=0)              # (lat, lon), skipping level 0
-    return yz, xy
+    return missing.any(axis=-1), missing[1:, :, :].any(axis=0)
 
 
-def prepare_timestep(ds_t: xr.Dataset):
+def prepare_timestep(ctx: CaseContext, ds_t: xr.Dataset):
     """Gridfill and interpolate one timestep onto the analysis grid.
 
-    Returns (u, v, t) as (plev, ylat, xlon) numpy arrays. Gridfill runs on the
-    input grid, before interpolation, exactly as in the original -- filling
-    after interpolation would spread missing values first and then fill the
-    smeared result.
+    Returns (u, v, t) as (plev, ylat, xlon) arrays. Gridfill runs on the input
+    grid, before interpolation, exactly as in the original -- filling afterwards
+    would spread missing values first and then fill the smeared result.
     """
-    filled = {}
-    for name in (u_var_name, v_var_name, t_var_name):
-        filled[name] = xr.apply_ufunc(
-            gridfill_each_level,
-            ds_t[name],
-            input_core_dims=((lat_name, lon_name),),
-            output_core_dims=((lat_name, lon_name),),
+    filled = {
+        name: xr.apply_ufunc(
+            gridfill_each_level, ds_t[name],
+            input_core_dims=((ctx.lat_name, ctx.lon_name),),
+            output_core_dims=((ctx.lat_name, ctx.lon_name),),
             vectorize=True, dask="forbidden")
+        for name in (ctx.u_var_name, ctx.v_var_name, ctx.t_var_name)}
 
     interpolated = xr.Dataset(filled).interp(
-        coords={lat_name: ylat, lon_name: xlon},
-        method="linear",
-        kwargs={"fill_value": "extrapolate"})
+        coords={ctx.lat_name: YLAT, ctx.lon_name: XLON},
+        method="linear", kwargs={"fill_value": "extrapolate"})
 
-    return (interpolated[u_var_name].values,
-            interpolated[v_var_name].values,
-            interpolated[t_var_name].values)
+    return (interpolated[ctx.u_var_name].values,
+            interpolated[ctx.v_var_name].values,
+            interpolated[ctx.t_var_name].values)
+
+
+def orient_for_qgfield(u, v, t, plev):
+    """Match QGField's expectations: plev descending, ylat ascending.
+
+    QGDataset does this internally; doing it here keeps the two paths
+    equivalent. YLAT is ascending by construction, so only plev can need
+    flipping.
+    """
+    if plev[0] < plev[-1]:
+        plev = plev[::-1]
+        u, v, t = u[::-1], v[::-1], t[::-1]
+    return u, v, t, plev
 
 
 def compute_one_timestep(u, v, t, plev, dz, kmax, on_even_grid) -> TimestepResult:
@@ -194,7 +297,7 @@ def compute_one_timestep(u, v, t, plev, dz, kmax, on_even_grid) -> TimestepResul
     long the season is.
     """
     qgfield = QGFieldNH18(
-        xlon, ylat, plev, u, v, t,
+        XLON, YLAT, plev, u, v, t,
         dz=dz, kmax=kmax,
         data_on_evenly_spaced_pseudoheight_grid=on_even_grid)
     qgfield.interpolate_fields(return_named_tuple=False)
@@ -211,22 +314,41 @@ def compute_one_timestep(u, v, t, plev, dz, kmax, on_even_grid) -> TimestepResul
     return result
 
 
-def orient_for_qgfield(u, v, t, plev):
-    """Match QGField's expectations: plev descending, ylat ascending.
+# ================================================================================
+# 3) Post-processing
+# ================================================================================
 
-    QGDataset does this internally; doing it here keeps the two paths
-    equivalent. ylat is the developer-defined analysis grid and is ascending by
-    construction, so only plev can need flipping.
+def interp_to_original_grid(ctx: CaseContext, field: np.ndarray,
+                            dims: str) -> np.ndarray:
+    """Map a single field off the analysis grid back onto the input grid."""
+    if dims == "yz":                 # (kmax, ylat) -> (kmax, lat)
+        da = xr.DataArray(field, dims=("height", "ylat"), coords={"ylat": YLAT})
+        return da.interp(ylat=ctx.original_grid[ctx.lat_name].values).values
+    if dims == "xy":                 # (ylat, xlon) -> (lat, lon)
+        da = xr.DataArray(field, dims=("ylat", "xlon"),
+                          coords={"ylat": YLAT, "xlon": XLON})
+        return da.interp(ylat=ctx.original_grid[ctx.lat_name].values,
+                         xlon=ctx.original_grid[ctx.lon_name].values).values
+    raise ValueError(dims)
+
+
+def result_to_original_grid(ctx: CaseContext,
+                            result: TimestepResult) -> TimestepResult:
+    """Map one timestep's diagnostics onto the input grid.
+
+    Done per timestep, before any time averaging, because the covariance is not
+    linear: interpolating the covariance is not the same as the covariance of
+    the interpolated fields, and the original driver does the latter. For the
+    linear quantities the order is immaterial, so matching here keeps the two
+    implementations comparable across every diagnostic rather than five of six.
     """
-    if plev[0] < plev[-1]:      # ascending pressure -> flip to descending
-        plev = plev[::-1]
-        u, v, t = u[::-1], v[::-1], t[::-1]
-    return u, v, t, plev
+    return TimestepResult(
+        uref=interp_to_original_grid(ctx, result.uref, "yz"),
+        zonal_mean_u=interp_to_original_grid(ctx, result.zonal_mean_u, "yz"),
+        zonal_mean_lwa=interp_to_original_grid(ctx, result.zonal_mean_lwa, "yz"),
+        lwa_baro=interp_to_original_grid(ctx, result.lwa_baro, "xy"),
+        u_baro=interp_to_original_grid(ctx, result.u_baro, "xy"))
 
-
-# ================================================================================
-# 3) Post-processing, identical in intent to the original driver
-# ================================================================================
 
 def calculate_covariance(lwa_baro: np.ndarray, u_baro: np.ndarray) -> np.ndarray:
     """Temporal covariance of LWA and U at each grid point, Bessel-corrected."""
@@ -238,13 +360,7 @@ def calculate_covariance(lwa_baro: np.ndarray, u_baro: np.ndarray) -> np.ndarray
     return (a_anomaly * b_anomaly).sum(axis=0) / (n_time - 1)
 
 
-SeasonalAverage = namedtuple(
-    "SeasonalAverage", [
-        "zonal_mean_u", "uref", "zonal_mean_lwa",
-        "lwa_baro", "u_baro", "covariance_lwa_u_baro"])
-
-
-def time_average_processing(results: List[TimestepResult]) -> SeasonalAverage:
+def time_average_processing(results: Sequence[TimestepResult]) -> SeasonalAverage:
     stacked = {f: np.stack([getattr(r, f) for r in results], axis=0)
                for f in TimestepResult._fields}
     return SeasonalAverage(
@@ -257,56 +373,26 @@ def time_average_processing(results: List[TimestepResult]) -> SeasonalAverage:
             stacked["lwa_baro"], stacked["u_baro"]))
 
 
-def result_to_original_grid(result: TimestepResult) -> TimestepResult:
-    """Map one timestep's diagnostics off the analysis grid onto the input grid.
-
-    Done per timestep, before any time averaging, because the covariance is not
-    linear: interpolating the covariance is not the same as the covariance of
-    the interpolated fields, and the original driver does the latter. For the
-    linear quantities the order is immaterial, so matching here keeps the two
-    implementations comparable across every diagnostic rather than five of six.
-
-    The cost is five small interpolations per timestep -- the fields are 2-D.
-    """
-    return TimestepResult(
-        uref=interp_to_original_grid(result.uref, "yz"),
-        zonal_mean_u=interp_to_original_grid(result.zonal_mean_u, "yz"),
-        zonal_mean_lwa=interp_to_original_grid(result.zonal_mean_lwa, "yz"),
-        lwa_baro=interp_to_original_grid(result.lwa_baro, "xy"),
-        u_baro=interp_to_original_grid(result.u_baro, "xy"))
-
-
-def interp_to_original_grid(field: np.ndarray, dims: str) -> np.ndarray:
-    """Map a single field off the analysis grid back onto the input grid."""
-    if dims == "yz":                 # (kmax, ylat) -> (kmax, lat)
-        da = xr.DataArray(field, dims=("height", "ylat"),
-                          coords={"ylat": ylat})
-        return da.interp(ylat=original_grid[lat_name].values).values
-    if dims == "xy":                 # (ylat, xlon) -> (lat, lon)
-        da = xr.DataArray(field, dims=("ylat", "xlon"),
-                          coords={"ylat": ylat, "xlon": xlon})
-        return da.interp(ylat=original_grid[lat_name].values,
-                         xlon=original_grid[lon_name].values).values
-    raise ValueError(dims)
-
-
 # ================================================================================
 # 4) Checkpointing
 # ================================================================================
 
-def checkpoint_path(season: str) -> str:
-    return os.path.join(wk_dir, "model", "netCDF", f"checkpoint_{season}.nc")
+def checkpoint_path(ctx: CaseContext, season: str) -> str:
+    return os.path.join(ctx.netcdf_dir, f"checkpoint_{season}.nc")
 
 
-def save_checkpoint(season: str, results: List[TimestepResult],
-                    yz_mask: np.ndarray, xy_mask: np.ndarray) -> None:
+def save_checkpoint(ctx: CaseContext, season: str,
+                    results: Sequence[TimestepResult],
+                    yz_mask: np.ndarray, xy_mask: np.ndarray,
+                    checkpoint_every: int = CHECKPOINT_EVERY) -> None:
     """Persist progress so a killed run resumes near where it stopped."""
-    if CHECKPOINT_EVERY <= 0 or not results:
+    if checkpoint_every <= 0 or not results:
         return
-    path = checkpoint_path(season)
+    path = checkpoint_path(ctx, season)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     stacked = {f: np.stack([getattr(r, f) for r in results], axis=0)
                for f in TimestepResult._fields}
-    ds = xr.Dataset(
+    dataset = xr.Dataset(
         data_vars={
             "uref": (("step", "height", "lat"), stacked["uref"]),
             "zonal_mean_u": (("step", "height", "lat"), stacked["zonal_mean_u"]),
@@ -315,17 +401,19 @@ def save_checkpoint(season: str, results: List[TimestepResult],
             "u_baro": (("step", "lat", "lon"), stacked["u_baro"]),
             "yz_mask": (("plev", "lat"), yz_mask.astype("i1")),
             "xy_mask": (("lat", "lon"), xy_mask.astype("i1"))},
-        attrs={"n_done": len(results), "season": season, "casename": casename})
+        attrs={"n_done": len(results), "season": season,
+               "casename": ctx.casename})
     tmp = path + ".tmp"
-    ds.to_netcdf(tmp)
-    ds.close()
+    dataset.to_netcdf(tmp)
+    dataset.close()
     os.replace(tmp, path)   # atomic: a killed write never leaves a half file
 
 
-def load_checkpoint(season: str):
+def load_checkpoint(ctx: CaseContext, season: str,
+                    checkpoint_every: int = CHECKPOINT_EVERY):
     """Return (results, yz_mask, xy_mask) from a checkpoint, or None."""
-    path = checkpoint_path(season)
-    if CHECKPOINT_EVERY <= 0 or not os.path.isfile(path):
+    path = checkpoint_path(ctx, season)
+    if checkpoint_every <= 0 or not os.path.isfile(path):
         return None
     try:
         with xr.open_dataset(path) as ds:
@@ -348,138 +436,190 @@ def load_checkpoint(season: str):
 
 
 # ================================================================================
-# 5) Plotting -- unchanged from the original driver
+# 5) Season driver
 # ================================================================================
 
-def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
-                         title_str, season, xy_mask=None, yz_mask=None):
-    if xy_mask is None:
-        yland, xland = [], []
-    else:
-        yland, xland = np.where(xy_mask)
-    lon_range = np.arange(-180, 181, 60)
-    lat_range = np.arange(-90, 91, 30)
-    cmap = "jet"
+def process_season(ctx: CaseContext, season: str, months: Sequence[int],
+                   checkpoint_every: int = CHECKPOINT_EVERY,
+                   progress: Optional[Callable[[str], None]] = print,
+                   progress_every: int = 20) -> SeasonResult:
+    """Compute every timestep of one season and return its diagnostics.
 
-    height_lat_plotter = HeightLatPlotter(
-        figsize=(4, 4), title_str=title_str, xgrid=original_grid[lat_name],
-        ygrid=analysis_height_array, cmap=cmap, xlim=[-80, 80])
-    height_lat_plotter.plot_and_save_variable(
-        variable=seasonal_average_data.zonal_mean_u, cmap=cmap,
-        var_title_str='zonal mean U',
-        save_path=f"{plot_dir}{season}_zonal_mean_u.eps", num_level=30)
-    height_lat_plotter.plot_and_save_variable(
-        variable=seasonal_average_data.zonal_mean_lwa, cmap=cmap,
-        var_title_str='zonal mean LWA',
-        save_path=f"{plot_dir}{season}_zonal_mean_lwa.eps", num_level=30)
-    height_lat_plotter.plot_and_save_variable(
-        variable=seasonal_average_data.uref, cmap=cmap,
-        var_title_str='zonal mean Uref',
-        save_path=f"{plot_dir}{season}_zonal_mean_uref.eps", num_level=30)
-    height_lat_plotter.plot_and_save_variable(
-        variable=seasonal_average_data.zonal_mean_u - seasonal_average_data.uref,
-        cmap=cmap, var_title_str=r'zonal mean $\Delta$ U',
-        save_path=f"{plot_dir}{season}_zonal_mean_delta_u.eps", num_level=30)
+    Seasons with fewer than two timesteps are returned with ``skipped=True``:
+    partial-year input is legitimate, and the covariance needs at least two.
+    """
+    def say(message: str) -> None:
+        if progress is not None:
+            progress(message)
 
-    lat_lon_plotter = LatLonMapPlotter(
-        figsize=(6, 3), title_str=title_str, xgrid=original_grid[lon_name],
-        ygrid=original_grid[lat_name], cmap=cmap, xland=xland, yland=yland,
-        lon_range=lon_range, lat_range=lat_range)
-    lat_lon_plotter.plot_and_save_variable(
-        variable=seasonal_average_data.u_baro, cmap=cmap, var_title_str='U baro',
-        save_path=f"{plot_dir}{season}_u_baro.eps", num_level=30)
-    lat_lon_plotter.plot_and_save_variable(
-        variable=seasonal_average_data.lwa_baro, cmap=cmap, var_title_str='LWA baro',
-        save_path=f"{plot_dir}{season}_lwa_baro.eps", num_level=30)
-    lat_lon_plotter.plot_and_save_variable(
-        variable=seasonal_average_data.covariance_lwa_u_baro, cmap="Purples_r",
-        var_title_str='Covariance between LWA and U(baro)',
-        save_path=f"{plot_dir}{season}_u_lwa_covariance.eps", num_level=30)
+    season_dataset = ctx.model_dataset.where(
+        ctx.model_dataset[ctx.time_coord_name].dt.month.isin(months), drop=True)
+    n_time = season_dataset[ctx.time_coord_name].size
+    say(f"{season}: {n_time} timesteps selected")
 
-
-# ================================================================================
-# 6) Main loop
-# ================================================================================
-model_or_obs: str = "model"
-season_to_months = [
-    ("DJF", [1, 2, 12]), ("MAM", [3, 4, 5]), ("JJA", [6, 7, 8]), ("SON", [9, 10, 11])]
-
-plot_dir = f"{wk_dir}/{model_or_obs}/PS/"
-os.makedirs(os.path.join(wk_dir, model_or_obs, "netCDF"), exist_ok=True)
-
-for season, selected_months in season_to_months:
-    print(f"\nseason: {season}")
-    season_dataset = model_dataset.where(
-        model_dataset[time_coord_name].dt.month.isin(selected_months), drop=True)
-    n_time = season_dataset[time_coord_name].size
-    print(f"{season}: {n_time} timesteps selected")
+    plev_hpa = season_dataset[ctx.plev_name].values
+    on_even_grid, dz, kmax = infer_vertical_grid(plev_hpa, default_dz=TARGET_DZ)
 
     if n_time < 2:
-        print(f"WARNING: {season} has {n_time} timestep(s); skipping this season.")
+        say(f"WARNING: {season} has {n_time} timestep(s); skipping this season.")
         season_dataset.close()
-        continue
+        return SeasonResult(season, n_time, [], None, None, None, None,
+                            dz, kmax, on_even_grid, skipped=True)
 
-    resumed = load_checkpoint(season)
+    say(f"{season}: vertical grid "
+        f"{'already evenly spaced in pseudoheight, falwa interpolation SKIPPED' if on_even_grid else 'needs interpolation'}"
+        f"; dz = {dz:.1f} m, kmax = {kmax}")
+
+    resumed = load_checkpoint(ctx, season, checkpoint_every)
     if resumed is None:
         results, yz_mask, xy_mask = [], None, None
     else:
         results, yz_mask, xy_mask = resumed
 
-    # Vertical grid, decided once per season from the input levels.
-    plev_hpa = season_dataset[plev_name].values
-    on_even_grid, dz, kmax = infer_vertical_grid(plev_hpa, default_dz=TARGET_DZ)
-    print(f"    vertical grid: "
-          f"{'evenly spaced in pseudoheight, interpolation SKIPPED' if on_even_grid else 'interpolating'}"
-          f"; dz = {dz:.1f} m, kmax = {kmax}")
-
     for step in range(len(results), n_time):
-        ds_t = season_dataset.isel({time_coord_name: step})[
-            [u_var_name, v_var_name, t_var_name]].load()
+        ds_t = season_dataset.isel({ctx.time_coord_name: step})[
+            [ctx.u_var_name, ctx.v_var_name, ctx.t_var_name]].load()
 
-        yz_t, xy_t = masks_for_timestep(ds_t[u_var_name].values)
+        yz_t, xy_t = masks_for_timestep(ds_t[ctx.u_var_name].values)
         yz_mask = yz_t if yz_mask is None else (yz_mask | yz_t)
         xy_mask = xy_t if xy_mask is None else (xy_mask | xy_t)
 
-        u, v, t = prepare_timestep(ds_t)
+        u, v, t = prepare_timestep(ctx, ds_t)
         ds_t.close()
         u, v, t, plev_oriented = orient_for_qgfield(u, v, t, plev_hpa)
 
-        results.append(result_to_original_grid(compute_one_timestep(
+        results.append(result_to_original_grid(ctx, compute_one_timestep(
             u, v, t, plev_oriented, dz, kmax, on_even_grid)))
         del u, v, t
 
-        if (step + 1) % 20 == 0 or step + 1 == n_time:
-            print(f"    {season}: {step + 1}/{n_time} timesteps")
-        if CHECKPOINT_EVERY > 0 and (step + 1) % CHECKPOINT_EVERY == 0:
-            save_checkpoint(season, results, yz_mask, xy_mask)
+        if progress_every and ((step + 1) % progress_every == 0 or step + 1 == n_time):
+            say(f"    {season}: {step + 1}/{n_time} timesteps")
+        if checkpoint_every > 0 and (step + 1) % checkpoint_every == 0:
+            save_checkpoint(ctx, season, results, yz_mask, xy_mask, checkpoint_every)
             gc.collect()
 
-    save_checkpoint(season, results, yz_mask, xy_mask)
+    save_checkpoint(ctx, season, results, yz_mask, xy_mask, checkpoint_every)
     season_dataset.close()
 
-    # --- seasonal averages, then back onto the input grid --------------------
-    analysis_height_array = np.arange(kmax) * dz
-    # results are already on the input grid, so the covariance is computed
-    # there too -- matching the original, and correct because covariance does
-    # not commute with interpolation.
-    seasonal_avg = time_average_processing(results)
+    return SeasonResult(
+        season=season, n_time=n_time, results=results,
+        seasonal_average=time_average_processing(results),
+        yz_mask=yz_mask, xy_mask=xy_mask,
+        analysis_height_array=np.arange(kmax) * dz,
+        dz=dz, kmax=kmax, on_even_grid=on_even_grid)
 
+
+# ================================================================================
+# 6) Plotting
+# ================================================================================
+
+def plot_season(ctx: CaseContext, season_result: SeasonResult,
+                plot_dir: Optional[str] = None,
+                save: bool = True) -> Dict[str, object]:
+    """Draw the seven figures for one season.
+
+    Returns a dict of name -> matplotlib Figure so a notebook can display them
+    inline; when *save* is true they are also written as EPS for the framework
+    to convert, which is what the generated webpage links to.
+    """
+    if season_result.skipped:
+        return {}
+    plot_dir = plot_dir if plot_dir is not None else ctx.plot_dir
+    if save:
+        os.makedirs(plot_dir, exist_ok=True)
+
+    average = season_result.seasonal_average
+    season = season_result.season
+    title_str = ctx.title_for(season)
+    xy_mask = season_result.xy_mask
+    yland, xland = (np.where(xy_mask) if xy_mask is not None else ([], []))
+    cmap = "jet"
+    figures: Dict[str, object] = {}
+
+    height_lat_plotter = HeightLatPlotter(
+        figsize=(4, 4), title_str=title_str,
+        xgrid=ctx.original_grid[ctx.lat_name],
+        ygrid=season_result.analysis_height_array, cmap=cmap, xlim=[-80, 80])
+    for name, field, label in (
+            ("zonal_mean_u", average.zonal_mean_u, "zonal mean U"),
+            ("zonal_mean_lwa", average.zonal_mean_lwa, "zonal mean LWA"),
+            ("zonal_mean_uref", average.uref, "zonal mean Uref"),
+            ("zonal_mean_delta_u", average.zonal_mean_u - average.uref,
+             r"zonal mean $\Delta$ U")):
+        figures[name] = height_lat_plotter.plot_and_save_variable(
+            variable=field, cmap=cmap, var_title_str=label,
+            save_path=f"{plot_dir}{season}_{name}.eps" if save else None,
+            num_level=30)
+
+    lat_lon_plotter = LatLonMapPlotter(
+        figsize=(6, 3), title_str=title_str,
+        xgrid=ctx.original_grid[ctx.lon_name],
+        ygrid=ctx.original_grid[ctx.lat_name], cmap=cmap,
+        xland=xland, yland=yland,
+        lon_range=np.arange(-180, 181, 60), lat_range=np.arange(-90, 91, 30))
+    for name, field, label, this_cmap in (
+            ("u_baro", average.u_baro, "U baro", cmap),
+            ("lwa_baro", average.lwa_baro, "LWA baro", cmap),
+            ("u_lwa_covariance", average.covariance_lwa_u_baro,
+             "Covariance between LWA and U(baro)", "Purples_r")):
+        figures[name] = lat_lon_plotter.plot_and_save_variable(
+            variable=field, cmap=this_cmap, var_title_str=label,
+            save_path=f"{plot_dir}{season}_{name}.eps" if save else None,
+            num_level=30)
+
+    return figures
+
+
+def save_diagnostics(ctx: CaseContext, season_result: SeasonResult,
+                     output_path: Optional[str] = None) -> Optional[str]:
+    """Write one season's mean diagnostics to netCDF."""
+    if season_result.skipped:
+        return None
+    output_path = output_path or os.path.join(
+        ctx.netcdf_dir, f"diagnostics_{season_result.season}.nc")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     save_seasonal_diagnostics(
-        seasonal_average_data=seasonal_avg,
-        analysis_height_array=analysis_height_array,
-        lat_coord=original_grid[lat_name], lon_coord=original_grid[lon_name],
-        output_path=f"{wk_dir}/{model_or_obs}/netCDF/diagnostics_{season}.nc")
+        seasonal_average_data=season_result.seasonal_average,
+        analysis_height_array=season_result.analysis_height_array,
+        lat_coord=ctx.original_grid[ctx.lat_name],
+        lon_coord=ctx.original_grid[ctx.lon_name],
+        output_path=output_path)
+    return output_path
 
-    title_string = f"{casename} ({firstyr}-{lastyr}) {season}"
-    plot_and_save_figure(
-        seasonal_average_data=seasonal_avg,
-        analysis_height_array=analysis_height_array,
-        plot_dir=plot_dir, title_str=title_string, season=season,
-        xy_mask=xy_mask, yz_mask=yz_mask)
-    print(f"{season}: figures written to {plot_dir}")
 
-    del results, seasonal_avg
-    gc.collect()
+# ================================================================================
+# 7) Standalone entry point
+# ================================================================================
 
-model_dataset.close()
-print("POD Finite-amplitude wave diagnostic (zonal mean, streaming) finished successfully!")
+def main() -> int:
+    import matplotlib
+    matplotlib.use("Agg")   # only when running headless; a notebook sets its own
+
+    ctx = load_case()
+    print(f"""
+    wk_dir   = {ctx.wk_dir}
+    casename = {ctx.casename}
+    variables = {ctx.u_var_name}, {ctx.v_var_name}, {ctx.t_var_name}
+    years    = {ctx.firstyr}-{ctx.lastyr}
+    checkpoint every = {CHECKPOINT_EVERY} timestep(s)
+    """)
+
+    for season, months in SEASON_TO_MONTHS:
+        print(f"\nseason: {season}")
+        season_result = process_season(ctx, season, months)
+        if season_result.skipped:
+            continue
+        save_diagnostics(ctx, season_result)
+        plot_season(ctx, season_result)
+        print(f"{season}: figures written to {ctx.plot_dir}")
+        del season_result
+        gc.collect()
+
+    ctx.model_dataset.close()
+    print("POD Finite-amplitude wave diagnostic (zonal mean, streaming) "
+          "finished successfully!")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

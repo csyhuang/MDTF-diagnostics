@@ -18,6 +18,12 @@ dependencies:
 # data catalog it names (intake-esm). See doc/sphinx/ref_envvars.rst.
 - pyyaml
 - intake-esm
+# The driver is a notebook, which the framework runs with
+# `jupyter nbconvert --to html --execute` (src/environment_manager.py:409).
+# This POD has its own environment, so it does not inherit these from
+# env_python3_base; without them the run fails at `/usr/bin/env jupyter`.
+- jupyter
+- nbconvert
 # falwa ships as a source distribution only: its F2PY extension modules are
 # built by Meson against the host machine, so there are no wheels to fall back
 # on. pip supplies the Python build backend (meson-python, ninja) itself via

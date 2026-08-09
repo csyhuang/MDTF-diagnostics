@@ -5,7 +5,14 @@
 //
 {
    "settings":{
-      "driver":"finite_amplitude_wave_diag_zonal_mean.py",
+      // The driver is the notebook: the framework maps .ipynb -> jupyter
+      // (src/pod_setup.py:75) and runs `nbconvert --to html --execute`,
+      // rendering the executed notebook to
+      // finite_amplitude_wave_diag_zonal_mean_ipynb.html in WORK_DIR.
+      // The computation lives in
+      // finite_amplitude_wave_diag_zonal_mean_rework.py, which the notebook
+      // imports and which can also be run directly.
+      "driver":"finite_amplitude_wave_diag_zonal_mean.ipynb",
       "long_name":"Finite-amplitude Rossby Wave Diagnostics (zonal-mean version)",
       "convention":"cmip",
       "description":"Finite-amplitude Rossby Wave Diagnostics (zonal-mean version)",
@@ -16,7 +23,12 @@
             "netCDF4",
             "numpy",
             "cartopy",
-            "falwa"
+            "falwa",
+            "gridfill",
+            "intake-esm",
+            "pyyaml",
+            "jupyter",
+            "nbconvert"
          ]
       }
    },
