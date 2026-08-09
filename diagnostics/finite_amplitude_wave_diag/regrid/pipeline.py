@@ -65,8 +65,15 @@ def regrid_variable(cfg: RegridConfig, var: str) -> List[str]:
         raise NCOError(f"input not found: {src}")
     if not os.path.isfile(cfg.ps_file):
         raise NCOError(f"PS not found: {cfg.ps_file}")
+    # Under --dry-run these are advisory: the whole point of a preview is to
+    # inspect the plan before committing to setup, which takes minutes and
+    # writes hundreds of MB. A real run still refuses to start without them.
     for artifact in (cfg.map_file, cfg.vrt_file):
-        if not os.path.isfile(artifact):
+        if os.path.isfile(artifact):
+            continue
+        if cfg.dry_run:
+            log.warning("%s missing -- `setup` has not been run yet", artifact)
+        else:
             raise NCOError(f"{artifact} missing -- run `setup` first")
 
     if not cfg.dry_run:
