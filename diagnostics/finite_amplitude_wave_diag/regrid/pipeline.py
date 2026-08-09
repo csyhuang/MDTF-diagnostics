@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import List, Tuple
 
 from .config import RegridConfig
@@ -22,6 +23,7 @@ from .levels import levels_above_model_top
 from .nco import (
     NCOError,
     global_attribute,
+    ncdump_header,
     n_time,
     read_values,
     require_tools,
@@ -39,6 +41,16 @@ _REMAP_ARTIFACTS = ("area", "gw", "lat_bnds", "lon_bnds")
 
 #: Global attribute recording which history stream a chunk came from.
 _STREAM_ATTR = "regrid_source_stream"
+
+
+def _has_variable(path: str, name: str) -> bool:
+    """True if *path* already contains variable *name*."""
+    try:
+        header = ncdump_header(path)
+    except NCOError:
+        return False
+    return re.search(rf"^\s*\w+\s+{re.escape(name)}\s*\(", header,
+                     re.MULTILINE) is not None
 
 
 def chunk_bounds(n_steps: int, chunk: int) -> List[Tuple[int, int]]:
@@ -207,11 +219,21 @@ def _regrid_chunk(
         # 1. Time subset of the 3-D field. Brings hyam/hybm/hyai/hybi/lev along.
         run(["ncks", "-O", "-h", "-d", f"time,{i0},{i1}", src, sub], cfg.dry_run)
 
-        # 2. Append the matching PS slice. PS lives in its own file and carries
-        #    no hybrid coefficients, so it must be merged into the 3-D file
-        #    rather than the other way round.
-        run(["ncks", "-A", "-h", "-d", f"time,{i0},{i1}", "-v", "PS",
-             cfg.ps_file, sub], cfg.dry_run)
+        # 2. Ensure PS is present. The h7i 3-D files already carry their own
+        #    PS, in which case there is nothing to do -- and appending anyway
+        #    is actively harmful: `ncks -A` brings the donor's time coordinate
+        #    with it, and the standalone PS file labels each step at the
+        #    interval MIDPOINT while T/U/V label it at the interval END. The
+        #    two hold bit-identical PS data over identical time_bnds, so the
+        #    pairing was never wrong, but the append silently shifted every
+        #    output timestamp back by three hours -- which propagates into the
+        #    catalog's time_range and, at a month boundary, can move a timestep
+        #    into the wrong season.
+        if not _has_variable(src, "PS"):
+            #    -C keeps NCO from dragging the coordinate variables along with
+            #    PS, so the target's own time survives the merge.
+            run(["ncks", "-A", "-C", "-h", "-d", f"time,{i0},{i1}", "-v", "PS",
+                 cfg.ps_file, sub], cfg.dry_run)
 
         # 3. P0 is absent from every file in this dataset. lev = 1000*(A+B) in
         #    hPa implies P0 = 100000 Pa.
