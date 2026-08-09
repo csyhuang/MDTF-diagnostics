@@ -63,7 +63,7 @@ from falwa.oopinterface import QGFieldNH18
 
 from finite_amplitude_wave_diag_utils import gridfill_each_level, infer_vertical_grid, \
     normalize_orientation, drop_leap_day, save_seasonal_diagnostics, \
-    LatLonMapPlotter, HeightLatPlotter
+    cftime_open_kwargs, LatLonMapPlotter, HeightLatPlotter
 
 #: Must match the frequency requested in settings.jsonc.
 FREQUENCY = "6hr"
@@ -218,7 +218,7 @@ def load_case(wk_dir: Optional[str] = None,
 
     dataset_dict = subset.to_dataset_dict(
         progressbar=False,
-        xarray_open_kwargs={"decode_times": True, "use_cftime": True})
+        xarray_open_kwargs=cftime_open_kwargs())
     model_dataset = dataset_dict[list(dataset_dict)[0]]
 
     missing = [v for v in (u_var_name, v_var_name, t_var_name)
@@ -361,8 +361,7 @@ def load_obs_case(era5_root, year: int,
         # stored as packed shorts and xarray unpacks them via scale_factor /
         # add_offset on read.
         merged.append(xr.open_mfdataset(
-            paths, combine="by_coords",
-            decode_times=True, use_cftime=True))
+            paths, combine="by_coords", **cftime_open_kwargs()))
 
     dataset = xr.merge(merged, join="exact")
     dataset = dataset.rename(

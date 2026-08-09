@@ -29,7 +29,7 @@ import gc
 from collections import namedtuple
 import matplotlib
 from finite_amplitude_wave_diag_utils import infer_vertical_grid, save_seasonal_diagnostics, \
-    DataPreprocessor, LatLonMapPlotter, HeightLatPlotter
+    cftime_open_kwargs, DataPreprocessor, LatLonMapPlotter, HeightLatPlotter
 
 # Commands to load third-party libraries. Any code you don't include that's
 # not part of your language's standard library should be listed in the
@@ -124,7 +124,7 @@ if cat_subset.df.empty:
 
 dataset_dict = cat_subset.to_dataset_dict(
     progressbar=False,
-    xarray_open_kwargs={"decode_times": True, "use_cftime": True})
+    xarray_open_kwargs=cftime_open_kwargs())
 model_dataset = dataset_dict[list(dataset_dict)[0]]
 
 missing_vars = [v for v in (u_var_name, v_var_name, t_var_name) if v not in model_dataset]

@@ -179,6 +179,28 @@ def save_seasonal_diagnostics(seasonal_average_data, analysis_height_array,
     print(f"Saved seasonal diagnostics to {output_path}")
 
 
+def cftime_open_kwargs() -> dict:
+    """Keyword arguments that decode time to cftime, across xarray versions.
+
+    xarray deprecated ``use_cftime`` as a standalone argument in favour of
+    ``decode_times=xr.coders.CFDatetimeCoder(use_cftime=True)``. The old form
+    still works, but emits a FutureWarning **for every file opened** -- on a
+    30-year digest that is ~1080 files and several thousand lines of identical
+    warning, which buries the progress log the run is monitored through.
+
+    The POD's own environment pins xarray 2023.2.0, which has no ``xr.coders``,
+    so this cannot simply be swapped: it has to work both ways.
+
+    Returns:
+        dict to splat into open_dataset / open_mfdataset, or into intake-esm's
+        ``xarray_open_kwargs``.
+    """
+    coder = getattr(getattr(xr, "coders", None), "CFDatetimeCoder", None)
+    if coder is not None:
+        return {"decode_times": coder(use_cftime=True)}
+    return {"decode_times": True, "use_cftime": True}
+
+
 def normalize_orientation(dataset, lat_name, plev_name, verbose=True):
     """Put a dataset into the axis order falwa requires.
 
