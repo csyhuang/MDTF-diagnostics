@@ -124,13 +124,24 @@ class CaseContext:
     lastyr: int
     catalog: object = None       # the intake datastore, handy in a notebook
 
+    #: "model" or "obs". Selects the output subdirectory, both of which the
+    #: framework creates under POD_WORK_DIR. Everything else in the pipeline is
+    #: source-agnostic: process_season and plot_season never inspect this.
+    model_or_obs: str = "model"
+
+    #: Override the kmax that infer_vertical_grid would derive. Left None the
+    #: analysis grid reaches as high as the data supports -- 42 levels for this
+    #: model case, 49 for ERA5. See the Cautions section of the POD docs: that
+    #: asymmetry is deliberate but it is not a like-for-like comparison.
+    kmax_override: Optional[int] = None
+
     @property
     def plot_dir(self) -> str:
-        return os.path.join(self.wk_dir, "model", "PS") + os.sep
+        return os.path.join(self.wk_dir, self.model_or_obs, "PS") + os.sep
 
     @property
     def netcdf_dir(self) -> str:
-        return os.path.join(self.wk_dir, "model", "netCDF")
+        return os.path.join(self.wk_dir, self.model_or_obs, "netCDF")
 
     def title_for(self, season: str) -> str:
         return f"{self.casename} ({self.firstyr}-{self.lastyr}) {season}"
@@ -247,6 +258,109 @@ def load_case(wk_dir: Optional[str] = None,
             lat_name: model_dataset.coords[lat_name],
             lon_name: model_dataset.coords[lon_name]},
         firstyr=firstyr, lastyr=lastyr, catalog=catalog)
+
+
+#: How ERA5 files on disk are named: {year}_{month:02d}_{variable}.nc
+ERA5_FILE_TEMPLATE = "{year:04d}_{month:02d}_{variable}.nc"
+
+#: ERA5 dimension names (grib_to_netcdf vintage) -> the POD's names. Newer CDS
+#: downloads use valid_time/pressure_level instead; both are handled.
+ERA5_RENAME = {
+    "longitude": "lon", "latitude": "lat",
+    "level": "plev", "pressure_level": "plev",
+    "valid_time": "time",
+}
+
+
+def load_obs_case(era5_root: str, year: int,
+                  wk_dir: Optional[str] = None,
+                  casename: str = "ERA5",
+                  variables: Sequence[str] = ("u", "v", "t"),
+                  months: Optional[Sequence[int]] = None,
+                  drop_feb29: bool = True,
+                  kmax_override: Optional[int] = None) -> CaseContext:
+    """Load one year of ERA5 into a CaseContext.
+
+    Returns the same object type as :func:`load_case`, so process_season,
+    plot_season and save_diagnostics work on reanalysis unchanged -- the only
+    thing that differs between model and observations is how the data is found.
+
+    One year at a time, because the digest spans decades and a whole-record
+    open_mfdataset over ~1000 files buys nothing when the work is per-season
+    anyway.
+
+    Args:
+        era5_root: directory holding {year}_{month}_{variable}.nc
+        year: calendar year to load
+        wk_dir: output root; defaults to $WORK_DIR
+        casename: label used in figure titles
+        variables: ERA5 variable names for u, v, t in that order
+        months: months to load, default all twelve. A partial year is legal --
+            useful for a test slice, and for a record that starts or ends
+            mid-year -- but every requested month must be present, since a
+            silently short season would bias the climatology it feeds.
+        drop_feb29: discard the leap day so every year weighs the same
+        kmax_override: force a specific analysis-grid depth
+
+    Returns:
+        CaseContext with model_or_obs="obs".
+    """
+    wk_dir = wk_dir or os.environ.get("WORK_DIR", ".")
+    u_name, v_name, t_name = variables
+
+    months = list(range(1, 13)) if months is None else list(months)
+
+    merged = []
+    for variable in variables:
+        paths = [os.path.join(era5_root,
+                              ERA5_FILE_TEMPLATE.format(year=year, month=m,
+                                                        variable=variable))
+                 for m in months]
+        missing = [q for q in paths if not os.path.isfile(q)]
+        if missing:
+            raise FileNotFoundError(
+                f"{len(missing)} ERA5 file(s) missing for {year} {variable}, "
+                f"first: {missing[0]}")
+        # decode_times is needed for the season selection; the fields are
+        # stored as packed shorts and xarray unpacks them via scale_factor /
+        # add_offset on read.
+        merged.append(xr.open_mfdataset(
+            paths, combine="by_coords",
+            decode_times=True, use_cftime=True))
+
+    dataset = xr.merge(merged, join="exact")
+    dataset = dataset.rename(
+        {k: v for k, v in ERA5_RENAME.items() if k in dataset.dims
+         or k in dataset.coords})
+
+    for name, expected in ((u_name, "u"), (v_name, "v"), (t_name, "t")):
+        if name not in dataset:
+            raise KeyError(f"{expected} variable {name!r} not in the ERA5 files; "
+                           f"found {list(dataset.data_vars)}")
+
+    # ERA5 levels are millibars, i.e. hPa already; label them so that the
+    # Pa-to-hPa conversion in the model path is not triggered by accident.
+    dataset["plev"].attrs["units"] = "hPa"
+
+    # falwa needs latitude ascending and pressure descending; ERA5 is stored
+    # the other way round on both axes.
+    dataset = normalize_orientation(dataset, "lat", "plev")
+    if drop_feb29:
+        dataset = drop_leap_day(dataset, "time")
+
+    return CaseContext(
+        wk_dir=wk_dir, casename=casename, catalog_file="",
+        model_dataset=dataset,
+        u_var_name=u_name, v_var_name=v_name, t_var_name=t_name,
+        time_coord_name="time", plev_name="plev",
+        lat_name="lat", lon_name="lon",
+        original_grid={
+            "time": dataset.coords["time"],
+            "plev": dataset.coords["plev"],
+            "lat": dataset.coords["lat"],
+            "lon": dataset.coords["lon"]},
+        firstyr=year, lastyr=year,
+        model_or_obs="obs", kmax_override=kmax_override)
 
 
 # ================================================================================
@@ -472,6 +586,10 @@ def process_season(ctx: CaseContext, season: str, months: Sequence[int],
 
     plev_hpa = season_dataset[ctx.plev_name].values
     on_even_grid, dz, kmax = infer_vertical_grid(plev_hpa, default_dz=TARGET_DZ)
+    if ctx.kmax_override is not None and ctx.kmax_override != kmax:
+        say(f"{season}: kmax {kmax} -> {ctx.kmax_override} (override); "
+            f"falwa will interpolate rather than pass through")
+        kmax, on_even_grid = ctx.kmax_override, False
 
     if n_time < 2:
         say(f"WARNING: {season} has {n_time} timestep(s); skipping this season.")
