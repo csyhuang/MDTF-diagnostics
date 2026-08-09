@@ -45,13 +45,107 @@ Physical assumptions made in FAWA framework
 Preprocessing of Climate Model Output
 -------------------------------------
 
+The POD requires ``U``, ``V`` and ``T`` on a **regular latitude-longitude grid**
+and on **pressure levels**. Nothing in the MDTF framework converts either a
+horizontal grid or a vertical coordinate, so native model output that is on an
+unstructured mesh, on hybrid-sigma levels, or both, has to be converted before
+the framework runs.
 
+For CAM/CESM spectral-element output (``VAR(time, lev, ncol)`` on a cubed
+sphere with hybrid-sigma levels), a converter ships with this POD in
+``regrid/``. It wraps NCO and TempestRemap and does the horizontal remap and
+the vertical interpolation in one pass. See ``regrid/README.md`` for the full
+manual; the short version is::
 
+    conda activate mdtf_regrid           # nco, esmf, tempest-remap
+    cd diagnostics/finite_amplitude_wave_diag
+    python -m regrid setup               # mesh, target grid, weights (once)
+    python -m regrid regrid T U V
+    python -m regrid validate <out_dir>/*.nc
+    python -m regrid catalog -o esm_catalog_<case>.json
 
+Three of its defaults are not free choices and should not be changed without
+reading the notes in ``regrid/README.md``: conservative remapping must be
+renormalised (``-r``), the vertical interpolation must be requested explicitly
+(``--vrt_ntp``), and below-ground cells should be left missing (``mss_val``)
+rather than extrapolated, because this POD fills them itself with a Poisson
+solver and records a mask of what it filled.
+
+Vertical coordinate
+^^^^^^^^^^^^^^^^^^^
+
+The analysis is carried out in pseudoheight, :math:`z = -H \ln(p/p_0)` with
+:math:`H` = 7000 m and :math:`p_0` = 1000 hPa. The POD inspects the input
+pressure levels and adapts:
+
+- If they are already evenly spaced in pseudoheight and start at the ground,
+  ``falwa`` is told so (``data_on_evenly_spaced_pseudoheight_grid=True``); it
+  then takes :math:`\Delta z` and ``kmax`` from the data and performs **no**
+  vertical interpolation of its own.
+- Otherwise the fields are interpolated onto a uniform pseudoheight grid of
+  spacing ``TARGET_DZ`` (1000 m by default) reaching as high as the data does.
+
+Supplying levels evenly spaced in pseudoheight therefore avoids one resampling
+step. Levels above the model top must not be requested: they return entirely
+missing and propagate into every column diagnostic.
 
 inline :math:`\frac{ \sum_{t=0}^{N}f(t,k) }{N}`
 
 .. Underline with '-'s to make a second-level heading.
+
+Running this POD
+----------------
+
+1. **Create the environment.** ``src/conda/env_finite_amplitude_wave_diag.yml``.
+   Note that ``falwa`` is distributed as source only -- its F2PY extensions are
+   compiled by Meson for the host machine -- so a Fortran compiler is required,
+   which is why ``fortran-compiler`` is among the dependencies.
+
+   ``gridfill`` has no ``osx-arm64`` build on conda-forge, so on Apple Silicon
+   the environment cannot be solved as written. It can be installed from source
+   there (``pip install git+https://github.com/ajdawson/gridfill.git``) if you
+   need to run the POD on that platform.
+
+2. **Prepare the data** as described under *Preprocessing* above, and build an
+   intake-ESM catalog for it.
+
+3. **Edit the runtime configuration**,
+   ``templates/runtime_config_finite_amplitude_wave_diag.yml``: point
+   ``DATA_CATALOG`` at your catalog, and set the case name and the
+   ``startdate``/``enddate`` to match the catalog's ``time_range``.
+
+   Use a frequency string the framework can parse. ``6hr`` works even for
+   instantaneous data; ``6hrPt`` appears in the catalog documentation but is
+   rejected by ``DateFrequency`` in ``src/util/datelabel.py``.
+
+4. **Run**::
+
+       ./mdtf -f templates/runtime_config_finite_amplitude_wave_diag.yml
+
+The framework queries the catalog on ``standard_name`` + ``frequency`` +
+``realm`` + a regex of the case name against ``path``, preprocesses the
+matches, writes ``case_info.yml`` into the POD's working directory, and passes
+its location to the driver in the ``case_env_file`` environment variable. The
+driver reads that file to locate the postprocessed catalog and the model's own
+variable and coordinate names.
+
+You do **not** need to create ``case_info.yml`` yourself. An annotated example
+of what the framework produces is in ``case_info_example.yml``, which also
+explains how to use a hand-written copy to run the driver standalone -- useful
+when iterating on the diagnostic without re-running the whole framework.
+
+Input data requirements
+^^^^^^^^^^^^^^^^^^^^^^^
+
+- ``U``, ``V``, ``T`` on ``(time, plev, lat, lon)``
+- Regular lat-lon grid; the POD interpolates onto its own 1-degree analysis
+  grid internally, so the input grid need not match it
+- Pressure levels, stored in Pa or hPa (the driver converts)
+- At least two timesteps per season; seasons with fewer are skipped with a
+  warning, since the LWA/U covariance is undefined otherwise
+- Missing values below ground are expected and are filled horizontally with a
+  Poisson solver, with the filled region recorded in a mask that the figures
+  mark
 
 Version & Contact info
 ----------------------
@@ -75,18 +169,88 @@ Unless you've distributed your script elsewhere, you don't need to change this.
 Functionality
 -------------
 
-(to be filled in)
+For each of the four seasons (DJF, MAM, JJA, SON) the POD:
+
+1. selects every timestep in the season -- at 6-hourly input, all four samples
+   a day. Local wave activity is a nonlinear functional of the instantaneous
+   field, so the diagnostics are computed per timestep and the *results* are
+   averaged, rather than averaging the input fields first;
+2. fills any missing values horizontally at each level with a Poisson solver
+   (``gridfill``), saving masks of the filled regions;
+3. interpolates onto the analysis grid, ``xlon`` = 0(1)359, ``ylat`` =
+   -90(1)90;
+4. computes the reference state, local wave activity and barotropic components
+   via ``falwa`` (``QGDataset`` with ``QGFieldNH18``);
+5. interpolates the results back onto the input grid, averages over the season,
+   and computes the covariance of barotropic LWA and U;
+6. plots.
+
+Step 4 is run in blocks of ``TIME_BATCH_SIZE`` timesteps. ``QGDataset`` holds
+one ``QGField`` per timestep and each retains several full three-dimensional
+fields, so a whole 6-hourly season at once would need over 100 GB. The
+quantities kept afterwards are two-dimensional and cheap, so batching bounds
+peak memory without changing any result -- the timesteps are independent.
+
+Outputs, per season: height-latitude sections of zonal-mean U, LWA, Uref and
+:math:`U - U_{ref}`; latitude-longitude maps of barotropic U, barotropic LWA
+and their covariance. Twenty-eight figures in total, plus the preprocessed
+intermediate fields as netCDF.
 
 Required programming language and libraries
 -------------------------------------------
 
-(to be filled in)
+Python 3. Dependencies are pinned in
+``src/conda/env_finite_amplitude_wave_diag.yml``:
 
+- ``falwa`` -- the finite-amplitude wave activity calculations. Source-only
+  distribution; needs a Fortran compiler at install time.
+- ``gridfill`` -- Poisson filling of missing values.
+- ``intake-esm`` and ``pyyaml`` -- reading the framework's ``case_info.yml``
+  hand-off and the data catalog it names.
+- ``xarray``, ``numpy``, ``scipy``, ``netCDF4``, ``dask``, ``bottleneck`` --
+  data handling.
+- ``matplotlib`` and ``cartopy`` -- plotting.
+
+The regridding helper in ``regrid/`` is separate and deliberately depends on
+nothing outside the Python standard library, since it only orchestrates NCO and
+TempestRemap command-line tools. Those must be on ``PATH``; a suitable
+environment is ``conda create -n mdtf_regrid -c conda-forge nco esmf
+tempest-remap``.
 
 Required model output variables
 -------------------------------
 
-(to be filled in)
+Three, all four-dimensional and at the same frequency:
+
+.. list-table::
+   :header-rows: 1
+
+   * - POD name
+     - standard_name
+     - Units
+     - Dimensions
+   * - ``ua``
+     - ``eastward_wind``
+     - m s-1
+     - time, plev, lat, lon
+   * - ``va``
+     - ``northward_wind``
+     - m s-1
+     - time, plev, lat, lon
+   * - ``ta``
+     - ``air_temperature``
+     - K
+     - time, plev, lat, lon
+
+The names above are the CMIP conventions declared in ``settings.jsonc``; the
+framework translates from the model's own convention, so CESM output supplies
+them as ``U``, ``V`` and ``T``. No surface field is required by the POD itself,
+though surface pressure is needed by the regridding step for any model on
+hybrid-sigma levels.
+
+The POD was developed against 6-hourly data. Any frequency the framework can
+parse will run, but the wave activity budget is most meaningful at sub-daily
+sampling.
 
 References
 ----------

@@ -1,0 +1,57 @@
+# Example of the case_info.yml that the MDTF framework generates for this POD.
+#
+# YOU DO NOT NEED TO CREATE THIS FILE TO RUN THE POD.
+#
+# The framework writes it to <WORK_DIR>/<pod_name>/case_info.yml on every run
+# (src/environment_manager.py::write_case_env_file) and points the POD at it
+# through the `case_env_file` environment variable. The driver reads it to find
+# the postprocessed data catalog and the model's own names for each variable
+# and coordinate. See doc/sphinx/ref_envvars.rst.
+#
+# This copy exists for two purposes:
+#
+#   1. Documentation -- it shows what the driver expects to find, so you can
+#      check a real run's case_info.yml against it when something goes wrong.
+#   2. Standalone debugging -- to run the driver outside the framework (handy
+#      when iterating on the science rather than the plumbing), copy this file,
+#      point the paths at data you already have, and run:
+#
+#          export WORK_DIR=/path/to/a/scratch/dir
+#          export case_env_file=/path/to/your/case_info.yml
+#          mkdir -p $WORK_DIR/model/PS $WORK_DIR/model/netCDF
+#          python finite_amplitude_wave_diag_zonal_mean.py
+#
+#      The catalog it names can be generated from regridded output with
+#          python -m regrid catalog -o <catalog>.json
+#      (see regrid/README.md).
+#
+# All paths below are placeholders. Replace every /path/to/... before use.
+
+# Absolute path to the intake-ESM catalog header (.json) describing the
+# postprocessed data. The framework normally writes this itself; when running
+# standalone, point it at a catalog you generated.
+CATALOG_FILE: /path/to/MDTF_postprocessed_data.json
+
+CASE_LIST:
+  # The key is the case name. This POD analyses one case at a time and takes
+  # the first entry, warning if more are supplied.
+  my_case_name:
+    case_name: my_case_name
+    convention: CESM
+    # YYYYMMDDHHMMSS. Must lie within the range covered by the catalog.
+    startdate: '20010101030000'
+    enddate: '20021231210000'
+
+    # Names of the variables AS THEY APPEAR IN THE DATA. The framework fills
+    # these in after any convention translation, so they are not necessarily
+    # the POD-convention names (ua/va/ta) declared in settings.jsonc. With
+    # CESM-convention data left untranslated they are U/V/T, as below.
+    ua_var: U
+    va_var: V
+    ta_var: T
+
+    # Names of the coordinates as they appear in the data.
+    time_coord: time
+    plev_coord: plev
+    lat_coord: lat
+    lon_coord: lon
