@@ -1,12 +1,15 @@
 from typing import Optional
 
 import gridfill
-import matplotlib.pyplot as plt  # python library we use to make plots
 import numpy as np
 import xarray as xr
 from falwa.constant import P_GROUND, SCALE_HEIGHT
-from matplotlib import gridspec
-from cartopy import crs as ccrs
+
+# matplotlib and cartopy are imported inside the plotting methods, not here.
+# The ERA5 digest job runs on a compute node and draws nothing, but a
+# module-level cartopy import would still force geos/proj/shapely into its
+# environment -- a large part of what makes that environment slow to solve and
+# heavy to install. Nothing else in this module needs them.
 
 # from diagnostics.finite_amplitude_wave_diag.finite_amplitude_wave_diag_zonal_mean import plev_name, lat_name, lon_name, \
 #     sampled_dataset
@@ -48,6 +51,10 @@ class LatLonMapPlotter(object):
         self._lat_range = lat_range
 
     def plot_and_save_variable(self, variable, cmap, var_title_str, save_path=None, num_level=30):
+        import matplotlib.pyplot as plt
+        from matplotlib import gridspec
+        from cartopy import crs as ccrs
+
         fig = plt.figure(figsize=self._figsize)
         spec = gridspec.GridSpec(
             ncols=1, nrows=1, wspace=0.3, hspace=0.3)
@@ -85,6 +92,9 @@ class HeightLatPlotter(object):
         self._xlim = xlim  # [-80, 80]
 
     def plot_and_save_variable(self, variable, cmap, var_title_str, save_path=None, num_level=30):
+        import matplotlib.pyplot as plt
+        from matplotlib import gridspec
+
         fig = plt.figure(figsize=self._figsize)
         spec = gridspec.GridSpec(ncols=1, nrows=1)
         ax = fig.add_subplot(spec[0])

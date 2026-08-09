@@ -56,7 +56,6 @@ from collections import namedtuple
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
-import intake
 import numpy as np
 import xarray as xr
 import yaml
@@ -202,6 +201,11 @@ def load_case(wk_dir: Optional[str] = None,
     plev_name = case_attrs.get("plev_coord", "plev")
     lat_name = case_attrs.get("lat_coord", "lat")
     lon_name = case_attrs.get("lon_coord", "lon")
+
+    # Imported here rather than at module scope: only the model path needs a
+    # data catalog, and the ERA5 digest job should not have to install
+    # intake-esm to read files it locates itself.
+    import intake
 
     catalog = intake.open_esm_datastore(catalog_file)
     subset = catalog.search(

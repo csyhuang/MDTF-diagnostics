@@ -1,0 +1,37 @@
+# Minimal environment for building the ERA5 digest (make_era5_digest.py).
+#
+# NOT the POD's runtime environment -- that is
+# env_finite_amplitude_wave_diag.yml, which additionally carries cartopy,
+# jupyter, nbconvert and intake-esm for the notebook driver and the plots.
+#
+# The digest job runs on a compute node, draws nothing, and locates its own
+# files, so it needs none of those. Leaving them out avoids pulling in
+# geos/proj/shapely and the notebook stack, which is most of what makes the
+# full environment slow to solve.
+#
+#   conda env create -f env_era5_digest.yml --solver=libmamba
+#   conda activate _MDTF_era5_digest
+#
+# Versions are deliberately left open. The digest is a one-off offline job, not
+# a reproducible POD run, so there is nothing to gain from pinning it to the
+# 2022-era versions the POD environment fixes -- and the tight pins are exactly
+# what makes that solve slow.
+name: _MDTF_era5_digest
+channels:
+- conda-forge
+dependencies:
+- python>=3.10
+- numpy
+- scipy
+- netCDF4
+- xarray
+- dask
+- bottleneck
+- pyyaml
+- gridfill
+# falwa is source-only: its F2PY extensions are built by Meson for the host, so
+# a Fortran compiler is required at install time.
+- fortran-compiler
+- pip
+- pip:
+   - falwa==2.3.3
