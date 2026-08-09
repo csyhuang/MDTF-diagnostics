@@ -1,0 +1,10 @@
+# Local scratch that must never ship with the POD.
+#
+# era5_testslice/ holds a few days of raw ERA5 pulled off the server for local
+# iteration on make_era5_digest.py, plus whatever QC plots get generated from
+# it. The repo-root .gitignore already covers *.nc, but not the PDFs and other
+# artefacts that land alongside them, and this directory sits inside the POD
+# directory that is packaged for MDTF.
+#
+# The real ERA5 input is passed with --era5-root and is never copied here.
+era5_testslice/
