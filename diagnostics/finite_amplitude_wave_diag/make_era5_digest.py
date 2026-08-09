@@ -6,7 +6,9 @@ of reanalysis, producing four small netCDF files. It must never run as part of
 ``./mdtf`` -- at run time the POD is in ``obs-read`` mode and simply loads what
 this wrote.
 
-    python make_era5_digest.py --era5-root /data/nnn/ERA5 \\
+    python -u make_era5_digest.py \\
+        --era5-root /nas/winds-data/csyhuang/ERA5-from-2019 \\
+                    /nas/winds-data2/csyhuang/ERA5 \\
         --start-year 1991 --end-year 2020 \\
         --output-dir ../../inputdata/obs_data/finite_amplitude_wave_diag
 
@@ -333,8 +335,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n\n")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--era5-root", required=True,
-                        help="directory holding {year}_{month}_{variable}.nc")
+    parser.add_argument("--era5-root", required=True, nargs="+", metavar="DIR",
+                        help="one or more directories holding the ERA5 files. "
+                             "Both the flat layout ({year}_{month}_{var}.nc) "
+                             "and the year-foldered one "
+                             "({year}/{year}_{month}_{var}.nc) are recognised, "
+                             "so archives split across disks can be given "
+                             "together. Where two overlap on a year, the "
+                             "earlier directory wins.")
     parser.add_argument("--start-year", type=int, default=1991)
     parser.add_argument("--end-year", type=int, default=2020)
     parser.add_argument("--output-dir", required=True,
@@ -355,6 +363,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                              "digest -- keep them out of the obs_data tar.")
     parser.add_argument("--no-year-stats", action="store_true",
                         help="skip the per-year statistics files")
+    parser.add_argument("--check-only", action="store_true",
+                        help="run the preflight file check and exit")
     parser.add_argument("--months", nargs="+", type=int, default=None,
                         metavar="M",
                         help="months to read, default all twelve. A partial "
@@ -365,6 +375,31 @@ def main(argv: Optional[List[str]] = None) -> int:
     os.makedirs(args.output_dir, exist_ok=True)
     work_dir = args.work_dir or args.output_dir
     state_file = checkpoint_path(args.output_dir)
+
+    # Preflight. A run spanning decades should not discover at hour 20 that one
+    # year is short a month; the whole file list is cheap to check up front.
+    months = list(range(1, 13)) if args.months is None else args.months
+    years = list(range(args.start_year, args.end_year + 1))
+    missing = []
+    for year in years:
+        for month in months:
+            for variable in args.variables:
+                if fawd.resolve_era5_path(args.era5_root, year, month,
+                                          variable) is None:
+                    missing.append(f"{year}_{month:02d}_{variable}.nc")
+    if missing:
+        print(f"PREFLIGHT FAILED: {len(missing)} of "
+              f"{len(years) * len(months) * len(args.variables)} files not found "
+              f"under {args.era5_root}")
+        for name in missing[:20]:
+            print(f"    {name}")
+        if len(missing) > 20:
+            print(f"    ... and {len(missing) - 20} more")
+        return 1
+    print(f"Preflight OK: {len(years) * len(months) * len(args.variables)} files "
+          f"found for {years[0]}-{years[-1]}")
+    if args.check_only:
+        return 0
 
     accumulators: Dict[str, SeasonAccumulator] = {}
     done_years: set = set()
@@ -382,7 +417,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "source": "ECMWF ERA5 reanalysis, pressure levels",
         "falwa_version": getattr(falwa, "__version__", "unknown"),
         "produced_by": "make_era5_digest.py",
-        "era5_root": args.era5_root,
+        "era5_root": " ".join(args.era5_root),
     }
 
     started = time.time()

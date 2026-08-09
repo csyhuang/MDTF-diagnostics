@@ -260,8 +260,33 @@ def load_case(wk_dir: Optional[str] = None,
         firstyr=firstyr, lastyr=lastyr, catalog=catalog)
 
 
-#: How ERA5 files on disk are named: {year}_{month:02d}_{variable}.nc
-ERA5_FILE_TEMPLATE = "{year:04d}_{month:02d}_{variable}.nc"
+#: Layouts ERA5 is stored in, tried in this order under each root. Archives
+#: accumulated over decades are rarely uniform -- one span may sit flat in a
+#: directory while an older span is foldered by year -- and the caller should
+#: not have to say which is which.
+ERA5_PATH_PATTERNS = (
+    "{year:04d}_{month:02d}_{variable}.nc",                    # flat
+    os.path.join("{year:04d}",
+                 "{year:04d}_{month:02d}_{variable}.nc"),      # year/ subdir
+)
+
+
+def resolve_era5_path(roots: Sequence[str], year: int, month: int,
+                      variable: str) -> Optional[str]:
+    """First existing file for (year, month, variable) across roots and layouts.
+
+    Roots are searched in the order given, and within each root the layouts in
+    ERA5_PATH_PATTERNS. Where two archives overlap -- a boundary year present
+    in both -- the earlier root wins, so precedence is explicit rather than
+    accidental.
+    """
+    for root in roots:
+        for pattern in ERA5_PATH_PATTERNS:
+            candidate = os.path.join(
+                root, pattern.format(year=year, month=month, variable=variable))
+            if os.path.isfile(candidate):
+                return candidate
+    return None
 
 #: ERA5 dimension names (grib_to_netcdf vintage) -> the POD's names. Newer CDS
 #: downloads use valid_time/pressure_level instead; both are handled.
@@ -272,7 +297,7 @@ ERA5_RENAME = {
 }
 
 
-def load_obs_case(era5_root: str, year: int,
+def load_obs_case(era5_root, year: int,
                   wk_dir: Optional[str] = None,
                   casename: str = "ERA5",
                   variables: Sequence[str] = ("u", "v", "t"),
@@ -290,7 +315,7 @@ def load_obs_case(era5_root: str, year: int,
     anyway.
 
     Args:
-        era5_root: directory holding {year}_{month}_{variable}.nc
+        era5_root: directory, or list of directories, holding the ERA5\n            files. Both the flat and year-foldered layouts are recognised;\n            see ERA5_PATH_PATTERNS. Earlier roots win where they overlap.
         year: calendar year to load
         wk_dir: output root; defaults to $WORK_DIR
         casename: label used in figure titles
@@ -309,18 +334,25 @@ def load_obs_case(era5_root: str, year: int,
     u_name, v_name, t_name = variables
 
     months = list(range(1, 13)) if months is None else list(months)
+    roots = [era5_root] if isinstance(era5_root, str) else list(era5_root)
 
     merged = []
+    resolved_roots = set()
     for variable in variables:
-        paths = [os.path.join(era5_root,
-                              ERA5_FILE_TEMPLATE.format(year=year, month=m,
-                                                        variable=variable))
-                 for m in months]
-        missing = [q for q in paths if not os.path.isfile(q)]
+        paths, missing = [], []
+        for month in months:
+            found = resolve_era5_path(roots, year, month, variable)
+            if found is None:
+                missing.append(f"{year}_{month:02d}_{variable}.nc")
+            else:
+                paths.append(found)
+                resolved_roots.add(
+                    next(r for r in roots if found.startswith(r)))
         if missing:
             raise FileNotFoundError(
-                f"{len(missing)} ERA5 file(s) missing for {year} {variable}, "
-                f"first: {missing[0]}")
+                f"{len(missing)} ERA5 file(s) not found for {year} {variable} "
+                f"under {roots}: {', '.join(missing[:4])}"
+                f"{' ...' if len(missing) > 4 else ''}")
         # decode_times is needed for the season selection; the fields are
         # stored as packed shorts and xarray unpacks them via scale_factor /
         # add_offset on read.
@@ -348,8 +380,13 @@ def load_obs_case(era5_root: str, year: int,
     if drop_feb29:
         dataset = drop_leap_day(dataset, "time")
 
+    if len(resolved_roots) > 1:
+        print(f"{year}: files drawn from {len(resolved_roots)} archives "
+              f"{sorted(resolved_roots)}")
+
     return CaseContext(
-        wk_dir=wk_dir, casename=casename, catalog_file="",
+        wk_dir=wk_dir, casename=casename,
+        catalog_file=",".join(sorted(resolved_roots)),
         model_dataset=dataset,
         u_var_name=u_name, v_var_name=v_name, t_var_name=t_name,
         time_coord_name="time", plev_name="plev",
