@@ -147,6 +147,121 @@ Input data requirements
   Poisson solver, with the filled region recorded in a mask that the figures
   mark
 
+Cautions and known limitations
+------------------------------
+
+Read this before interpreting a model--observation comparison.
+
+Vertical extent differs between model and reanalysis
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``kmax``, the number of levels in the pseudoheight analysis grid, is set to the
+largest value each dataset can support rather than to a common value. That
+keeps the maximum information from each, but it is a deliberate compromise
+rather than a like-for-like comparison:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Source
+     - Top level
+     - ``kmax``
+     - Analysis grid
+   * - CAM ne120L58 (this case)
+     - 2.859 hPa
+     - 42
+     - z = 0--41 km
+   * - ERA5 (37 pressure levels)
+     - 1 hPa
+     - 49
+     - z = 0--48 km
+
+**The consequence is not confined to the top of the column.** The reference
+state ``uref`` is obtained by inverting the quasi-geostrophic potential
+vorticity over the whole column, so changing ``kmax`` changes ``uref`` at
+*every* height, not only above 41 km. Differences in ``uref`` and in
+``zonal_mean_u - uref`` therefore carry a methodological component throughout
+the profile. ``lwa_baro`` and ``u_baro`` are density-weighted column integrals
+and are affected more weakly, but they are affected.
+
+Truncating the reanalysis to the model's top does not fix this cleanly: after
+dropping the 1 and 2 hPa levels the next level is 3 hPa, giving ``kmax`` = 41
+rather than 42.
+
+Each output file records ``kmax``, ``dz`` and the top pressure in its global
+attributes, and the POD warns when the model and observational values differ,
+so the asymmetry is visible at run time rather than only here.
+
+Below-ground values are constructed differently in model and reanalysis
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Where the surface lies above a pressure level -- 1000 hPa over the Tibetan
+Plateau, for instance -- there is no atmosphere to report, and the two sources
+fill that space by different means:
+
+- **Model.** Regridding leaves those cells missing (``VRT_XTR=mss_val``), and
+  the POD fills them by solving Poisson's equation horizontally on each level,
+  recording a mask of what was filled.
+- **ERA5.** Pressure-level fields are already extrapolated beneath the surface
+  by ECMWF. The POD sees no missing values, so gridfill is bypassed and the
+  mask is empty.
+
+Nothing errors, and both look equally plausible. At 1000 hPa roughly 47% of the
+grid is below ground in the model case, and 13% at 925 hPa, so **the lowest one
+or two analysis levels (z = 0 and 1 km) should not be read as a clean
+model--observation difference.** The barotropic quantities are density-weighted
+and comparatively insensitive; ``zonal_mean_u`` near the ground is the most
+exposed.
+
+This is documented rather than corrected, on the grounds that published work
+with ERA5 has not masked below-ground points either. Masking both sources
+against a surface-pressure criterion is the obvious refinement if the lowest
+levels turn out to matter.
+
+Axis orientation is enforced, not assumed
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``QGField`` requires **latitude ascending** and **pressure descending**.
+Reanalysis is commonly stored the other way round: ERA5 from the CDS is
+latitude-descending with pressure levels ascending from 1 hPa. The POD
+reorients the input once, at load time, on the xarray Dataset -- which flips
+the coordinate and the data together.
+
+The reason for doing it on the Dataset rather than on arrays is that flipping a
+coordinate and its data separately is easy to get half-right, and the result is
+an inverted column or a hemisphere-flipped field: output that looks entirely
+reasonable and is wrong.
+
+Calendars are equalised by discarding 29 February
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The model uses a ``noleap`` calendar; reanalysis does not. The POD drops
+29 February so that both calendars agree and every year contributes the same
+number of timesteps -- which also makes a per-year mean and a pooled mean
+identical, removing the weighting question rather than answering it.
+
+Over 1991--2020 this discards 32 of 43832 six-hourly timesteps, 0.073%.
+
+Note also that DJF is *climatological*: months 12, 1 and 2 are pooled, so
+December of a given year is grouped with January and February of that same
+year, not of the following one. Every winter then contains exactly 90 days.
+
+Settings that are not free choices
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Three regridding options look like tuning knobs and are not; see
+``regrid/README.md`` before altering them.
+
+- Conservative remapping must be renormalised (``-r``). Without it, below-ground
+  missing values are counted as zero, which on a one-day test produced 2599
+  cells at 1000 hPa holding temperatures between 0 and 150 K -- wrong, but not
+  obviously wrong.
+- ``ncremap`` performs no vertical interpolation unless ``--vrt_ntp`` is given.
+  Naming a target grid is not sufficient.
+- ``VRT_XTR=mss_val`` leaves below-ground cells missing so that the POD's own
+  gridfill can act on them and record what it filled. The alternative hands the
+  POD fabricated values it cannot distinguish from real ones.
+
 Version & Contact info
 ----------------------
 

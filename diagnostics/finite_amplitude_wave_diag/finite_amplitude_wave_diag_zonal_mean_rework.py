@@ -63,7 +63,8 @@ import yaml
 from falwa.oopinterface import QGFieldNH18
 
 from finite_amplitude_wave_diag_utils import gridfill_each_level, infer_vertical_grid, \
-    save_seasonal_diagnostics, LatLonMapPlotter, HeightLatPlotter
+    normalize_orientation, drop_leap_day, save_seasonal_diagnostics, \
+    LatLonMapPlotter, HeightLatPlotter
 
 #: Must match the frequency requested in settings.jsonc.
 FREQUENCY = "6hr"
@@ -157,7 +158,8 @@ class SeasonResult:
 
 def load_case(wk_dir: Optional[str] = None,
               case_env_file: Optional[str] = None,
-              frequency: str = FREQUENCY) -> CaseContext:
+              frequency: str = FREQUENCY,
+              drop_feb29: bool = True) -> CaseContext:
     """Resolve the framework hand-off into a CaseContext.
 
     The framework passes the POD its inputs through case_info.yml, whose
@@ -221,6 +223,17 @@ def load_case(wk_dir: Optional[str] = None,
         model_dataset = model_dataset.assign_coords(
             {plev_name: model_dataset[plev_name] / 100})
         model_dataset[plev_name].attrs["units"] = "hPa"
+
+    # falwa requires latitude ascending and pressure descending. Done once,
+    # here, so every downstream step sees a single orientation -- and so the
+    # coordinate and the data can never be flipped independently of each other.
+    model_dataset = normalize_orientation(model_dataset, lat_name, plev_name)
+
+    # Equalise the calendars: the model is noleap, reanalysis is not. With
+    # 29 February removed every year holds the same number of timesteps, so a
+    # per-year mean and a pooled mean agree.
+    if drop_feb29:
+        model_dataset = drop_leap_day(model_dataset, time_coord_name)
 
     return CaseContext(
         wk_dir=wk_dir, casename=casename, catalog_file=catalog_file,

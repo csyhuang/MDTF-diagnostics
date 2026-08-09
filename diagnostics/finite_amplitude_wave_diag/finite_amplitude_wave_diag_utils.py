@@ -169,6 +169,82 @@ def save_seasonal_diagnostics(seasonal_average_data, analysis_height_array,
     print(f"Saved seasonal diagnostics to {output_path}")
 
 
+def normalize_orientation(dataset, lat_name, plev_name, verbose=True):
+    """Put a dataset into the axis order falwa requires.
+
+    ``QGField`` expects **latitude ascending** (south to north) and **pressure
+    descending** (i.e. pseudoheight ascending). Reanalysis is commonly stored
+    the other way round -- ERA5 from the CDS is latitude-descending, and its
+    pressure levels ascend from 1 hPa -- so the input has to be reoriented
+    before anything else touches it.
+
+    This mirrors the treatment in falwa's own
+    ``notebooks/nh2018_science/demo_script_for_nh2018.ipynb``, with one
+    difference: doing it on the xarray Dataset flips the coordinate and the
+    data together and cannot desynchronise them. Flipping a coordinate array
+    and the data separately is easy to get half-right, and an inverted column
+    or a hemisphere-flipped field produces plausible-looking output rather than
+    an error.
+
+    Applied once at load time, so every downstream step sees one orientation.
+
+    Args:
+        dataset (xr.Dataset): input, modified by reindexing (not in place).
+        lat_name (str): name of the latitude coordinate.
+        plev_name (str): name of the pressure coordinate.
+        verbose (bool): report when a flip happens.
+
+    Returns:
+        xr.Dataset with latitude ascending and pressure descending.
+    """
+    if lat_name in dataset.coords:
+        lat = dataset[lat_name].values
+        if lat.size > 1 and lat[1] < lat[0]:
+            if verbose:
+                print(f"Flip {lat_name}: descending -> ascending (falwa requires "
+                      f"south-to-north)")
+            dataset = dataset.isel({lat_name: slice(None, None, -1)})
+
+    if plev_name in dataset.coords:
+        plev = dataset[plev_name].values
+        if plev.size > 1 and plev[1] > plev[0]:
+            if verbose:
+                print(f"Flip {plev_name}: ascending -> descending (falwa requires "
+                      f"ascending pseudoheight)")
+            dataset = dataset.isel({plev_name: slice(None, None, -1)})
+
+    return dataset
+
+
+def drop_leap_day(dataset, time_coord_name, verbose=True):
+    """Remove 29 February, so every year contributes the same sample count.
+
+    The model runs on a ``noleap`` calendar; reanalysis does not. Dropping the
+    leap day makes the two calendars agree and, more usefully, makes every year
+    -- and every DJF winter -- contain exactly the same number of timesteps. A
+    per-year mean and a pooled mean then coincide, which removes the weighting
+    question rather than answering it.
+
+    The cost is small: over 1991-2020 there are 8 leap years, so at 6-hourly
+    sampling this discards 32 of 43832 timesteps, 0.073%.
+
+    A no-op on calendars that have no leap day.
+    """
+    time = dataset[time_coord_name]
+    try:
+        is_leap_day = (time.dt.month == 2) & (time.dt.day == 29)
+    except (AttributeError, TypeError):
+        return dataset                      # non-datetime axis; nothing to do
+
+    n_dropped = int(is_leap_day.sum())
+    if n_dropped == 0:
+        return dataset
+    if verbose:
+        print(f"Dropping {n_dropped} timestep(s) on 29 February so every year "
+              f"has equal weight")
+    return dataset.sel({time_coord_name: ~is_leap_day})
+
+
 def infer_vertical_grid(plev_hPa, default_dz=1000.0, tol=1.0):
     """Decide whether the input already sits on an evenly spaced pseudoheight grid.
 
