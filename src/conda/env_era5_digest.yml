@@ -12,15 +12,27 @@
 #   conda env create -f env_era5_digest.yml --solver=libmamba
 #   conda activate _MDTF_era5_digest
 #
-# Versions are deliberately left open. The digest is a one-off offline job, not
-# a reproducible POD run, so there is nothing to gain from pinning it to the
-# 2022-era versions the POD environment fixes -- and the tight pins are exactly
-# what makes that solve slow.
+# Library versions are deliberately left open -- the digest is a one-off offline
+# job, not a reproducible POD run, and the tight pins are what make the POD's
+# own environment slow to solve.
+#
+# Python itself IS pinned. Left open it resolves to whatever is newest, which
+# at the time of writing meant 3.14; falwa builds F2PY extension modules from
+# source against numpy, and the newest interpreter is the worst place to
+# discover that something in that toolchain has moved. 3.12 is what this was
+# tested against.
+#
+# NOTE ON DISK: building falwa from source needs room in both TMPDIR and the
+# pip cache, and a full home directory shows up as an obscure failure late in
+# the build:
+#     [Errno 28] No space left on device: '~/.cache/pip/wheels/...'
+# If home is tight, point both elsewhere before installing:
+#     export TMPDIR=/nas/<somewhere>/tmp PIP_CACHE_DIR=/nas/<somewhere>/pipcache
 name: _MDTF_era5_digest
 channels:
 - conda-forge
 dependencies:
-- python>=3.10
+- python=3.12
 - numpy
 - scipy
 - netCDF4
