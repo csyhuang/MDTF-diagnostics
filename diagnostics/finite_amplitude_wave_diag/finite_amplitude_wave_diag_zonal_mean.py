@@ -26,80 +26,124 @@
 # ================================================================================
 import os
 import gc
-import socket
 from collections import namedtuple
 import matplotlib
-from finite_amplitude_wave_diag_utils import convert_hPa_to_pseudoheight, DataPreprocessor, LatLonMapPlotter, \
+from finite_amplitude_wave_diag_utils import infer_vertical_grid, DataPreprocessor, LatLonMapPlotter, \
     HeightLatPlotter
 
 # Commands to load third-party libraries. Any code you don't include that's
-# not part of your language's standard library should be listed in the 
+# not part of your language's standard library should be listed in the
 # settings.jsonc file.
 from typing import Dict
+import intake
 import numpy as np
 import xarray as xr  # python library we use to read netcdf files
+import yaml
 from falwa.xarrayinterface import QGDataset
 from falwa.oopinterface import QGFieldNH18
-from falwa.constant import P_GROUND, SCALE_HEIGHT
 
-if socket.gethostname() == 'otc':
-    matplotlib.use('Agg')  # non-X windows backend
+matplotlib.use('Agg')  # non-X windows backend; the framework always runs headless
 
-# 1) Loading model data files:
-#
-# The framework copies model data to a regular directory structure of the form
-# <DATADIR>/<frequency>/<CASENAME>.<variable_name>.<frequency>.nc
-# Here <variable_name> and frequency are requested in the "varlist" part of 
-# settings.json.
-already_done_gridfill: bool = True
-load_environ: bool = (socket.gethostname() == 'otc')
 frequency = "6hr"  # must match the frequency requested in settings.jsonc
 
-if socket.gethostname() == 'otc':
-    matplotlib.use('Agg')  # non-X windows backend
+# Timesteps handed to falwa at once. QGDataset builds one QGField per timestep
+# and each retains roughly nine full 3-D fields, about 190 MiB at 42x181x360,
+# so a whole 6-hourly season in one call would need over 100 GiB. Results are
+# unaffected by this number -- timesteps are independent -- so lower it if
+# memory is tight, raise it if there is headroom.
+TIME_BATCH_SIZE = 40
 
-if load_environ:  # otc path
-    print(
-        f"""
-        Start running on OTC. Print out all environment variables:
-        {os.environ}
-        """)
-    wk_dir = os.environ["WORK_DIR"]
-    uvt_path = f"{os.environ['DATADIR']}/{frequency}/{os.environ['CASENAME']}.[uvt]a.{frequency}.nc"
-    casename = os.environ["CASENAME"]
-else:  # iMac path
-    wk_dir = "/Users/claresyhuang/Dropbox/GitHub/hn2016_falwa/github_data_storage"
-    uvt_path = f"{os.environ['HOME']}/Dropbox/GitHub/mdtf/MDTF-diagnostics/diagnostics/finite_amplitude_wave_diag/" + \
-               "GFDL-CM3_historical_r1i1p1_20050101-20051231_10tslice.nc"
-    casename = "GFDL-CM3_historical_r1i1p1"
-
-print(
-    f"""
-    wk_dir = {wk_dir}
-    uvt_path = {uvt_path}
-    casename = {casename}
-    """)
-
-# *** Coordinates of input dataset ***
-u_var_name = "ua"
-v_var_name = "va"
-t_var_name = "ta"
-time_coord_name = "time"
-plev_name = "plev"
-lat_name = "lat"
-lon_name = "lon"
+# Pseudoheight spacing requested when the input is NOT already on an evenly
+# spaced pseudoheight grid. Ignored when it is: falwa then takes dz from the
+# data. See infer_vertical_grid.
+TARGET_DZ = 1000.0
 
 # *** Regular analysis grid defined by developer ***
 xlon = np.arange(0, 360, 1.0)
 ylat = np.arange(-90, 91, 1.0)
 
+# 1) Loading model data files:
+#
+# The framework hands the POD its inputs through case_info.yml, whose location
+# is given by the `case_env_file` environment variable. That file holds the
+# path of the postprocessed data catalog plus, for each case, the model's own
+# names for every requested variable and coordinate. This follows
+# diagnostics/example_multicase and doc/sphinx/ref_envvars.rst.
+#
+# Reading os.environ['CASENAME'] directly, and building input paths by hand,
+# are both pre-v4.0 patterns. The hand-built path this POD used before,
+# <DATADIR>/<frequency>/<CASENAME>.<var>.<frequency>.nc, could never have
+# matched: DATADIR is the POD's own work directory (WORK_DIR/<pod_name>) while
+# the preprocessor writes to the case directory (WORK_DIR/<case_name>/<freq>/).
+# Compare src/util/path_utils.py:109 with :158, and src/varlist_util.py:607.
+wk_dir = os.environ["WORK_DIR"]
+case_env_file = os.environ["case_env_file"]
+assert os.path.isfile(case_env_file), f"case environment file not found: {case_env_file}"
+with open(case_env_file, 'r') as stream:
+    case_info = yaml.safe_load(stream)
+
+cat_def_file = case_info['CATALOG_FILE']
+case_list = case_info['CASE_LIST']
+
+# This POD analyses one case at a time.
+casename = list(case_list.keys())[0]
+case_attrs = case_list[casename]
+if len(case_list) > 1:
+    print(f"WARNING: {len(case_list)} cases supplied; this POD analyses one. Using {casename}.")
+
+# *** Coordinates of input dataset ***
+# Taken from the framework rather than hardcoded, so that a convention whose
+# names differ from the POD's still resolves.
+u_var_name = case_attrs.get('ua_var', 'ua')
+v_var_name = case_attrs.get('va_var', 'va')
+t_var_name = case_attrs.get('ta_var', 'ta')
+time_coord_name = case_attrs.get('time_coord', 'time')
+plev_name = case_attrs.get('plev_coord', 'plev')
+lat_name = case_attrs.get('lat_coord', 'lat')
+lon_name = case_attrs.get('lon_coord', 'lon')
+
+print(
+    f"""
+    wk_dir = {wk_dir}
+    catalog = {cat_def_file}
+    casename = {casename}
+    variables = {u_var_name}, {v_var_name}, {t_var_name}
+    coords = {time_coord_name}, {plev_name}, {lat_name}, {lon_name}
+    """)
+
 # 2) Doing computations:
-model_dataset = xr.open_mfdataset(uvt_path)  # command to load the netcdf file
-firstyr = model_dataset.coords['time'].values[0].year
-lastyr = model_dataset.coords['time'].values[-1].year
+cat = intake.open_esm_datastore(cat_def_file)
+cat_subset = cat.search(
+    variable_id=[u_var_name, v_var_name, t_var_name], frequency=frequency)
+if cat_subset.df.empty:
+    raise ValueError(
+        f"No assets in {cat_def_file} for variables "
+        f"{[u_var_name, v_var_name, t_var_name]} at frequency '{frequency}'. "
+        f"Available variable_id: {sorted(cat.df['variable_id'].unique())}; "
+        f"frequency: {sorted(cat.df['frequency'].unique())}")
+
+dataset_dict = cat_subset.to_dataset_dict(
+    progressbar=False,
+    xarray_open_kwargs={"decode_times": True, "use_cftime": True})
+model_dataset = dataset_dict[list(dataset_dict)[0]]
+
+missing_vars = [v for v in (u_var_name, v_var_name, t_var_name) if v not in model_dataset]
+if missing_vars:
+    raise KeyError(
+        f"{missing_vars} absent from the dataset returned by the catalog query. "
+        f"Found {list(model_dataset.data_vars)}. If the catalog splits these "
+        f"across groups, check the groupby_attrs in {cat_def_file}.")
+
+firstyr = model_dataset.coords[time_coord_name].values[0].year
+lastyr = model_dataset.coords[time_coord_name].values[-1].year
 if model_dataset[plev_name].units == 'Pa':  # Pa shall be divided by 100 to become hPa
     print("model_dataset[plev_name].units == 'Pa'. Convert it to hPa.")
-    model_dataset = model_dataset.assign_coords({plev_name: model_dataset[plev_name] // 100})
+    # True division, not //. Floor division silently truncates any level that is
+    # not a whole number of hPa, and on a grid evenly spaced in pseudoheight that
+    # is most of them: 380.504 Pa and 329.851 Pa both collapse onto 3 hPa,
+    # leaving a non-monotonic vertical coordinate. It also biases plev.min(),
+    # and hence kmax below, towards levels that hold no data.
+    model_dataset = model_dataset.assign_coords({plev_name: model_dataset[plev_name] / 100})
     model_dataset[plev_name].attrs["units"] = 'hPa'
 print(f"""
     Use xlon: {xlon}
@@ -115,21 +159,16 @@ original_grid = {
     lon_name: model_dataset.coords[lon_name]}
 
 
-def compute_from_sampled_data(gridfilled_dataset: xr.Dataset):
-
-    # === 2.3) VERTICAL RESOLUTION: determine the maximum pseudo-height this calculation can handle ===
-    dz = 1000  # TODO Variable to set earlier?
-    hmax = -SCALE_HEIGHT * np.log(gridfilled_dataset[plev_name].min() / P_GROUND)
-    kmax = int(hmax // dz) + 1
-    original_pseudoheight = convert_hPa_to_pseudoheight(original_grid[plev_name]).rename("height")
-
-    # === 2.4) WAVE ACTIVITY COMPUTATION: Compute Uref, FAWA, barotropic components of u and LWA ===
+def compute_batch(batch_dataset: xr.Dataset, dz, kmax, on_even_grid: bool):
+    """Run the falwa diagnostics on one block of timesteps."""
     qgds = QGDataset(
-        gridfilled_dataset,
+        batch_dataset,
         var_names={"u": u_var_name, "v": v_var_name, "t": t_var_name},
         qgfield=QGFieldNH18,
-        qgfield_kwargs={"dz": dz, "kmax": kmax})
-    gridfilled_dataset.close()
+        qgfield_kwargs={
+            "dz": dz,
+            "kmax": kmax,
+            "data_on_evenly_spaced_pseudoheight_grid": on_even_grid})
     # Compute reference states and LWA
     qgds.interpolate_fields(return_dataset=False)
     qgds.compute_reference_states(return_dataset=False)
@@ -142,24 +181,78 @@ def compute_from_sampled_data(gridfilled_dataset: xr.Dataset):
         'u_baro': qgds.u_baro}).interp(coords={
         "xlon": (lon_name, original_grid[lon_name].data),
         "ylat": (lat_name, original_grid[lat_name].data)})
+    # Materialise before the QGField objects behind it are released.
+    output_dataset = output_dataset.compute()
+    del qgds
+    gc.collect()
+    return output_dataset
+
+
+def compute_from_sampled_data(gridfilled_dataset: xr.Dataset):
+
+    # === 2.3) VERTICAL RESOLUTION ===
+    # If the input already sits on an evenly spaced pseudoheight grid, hand it
+    # to falwa as-is: it then takes dz and kmax from the data and skips the
+    # vertical interpolation. Otherwise fall back to interpolating onto a
+    # TARGET_DZ grid reaching as high as the data does.
+    on_even_grid, dz, kmax = infer_vertical_grid(
+        gridfilled_dataset[plev_name].values, default_dz=TARGET_DZ)
+    print(
+        f"""
+        Vertical grid: {'already evenly spaced in pseudoheight' if on_even_grid else 'needs interpolation'}
+        dz = {dz} m, kmax = {kmax}
+        vertical interpolation in falwa: {'SKIPPED' if on_even_grid else 'performed'}
+        """)
+
+    # === 2.4) WAVE ACTIVITY COMPUTATION: Compute Uref, FAWA, barotropic components of u and LWA ===
+    # Processed in blocks of timesteps. QGDataset holds one QGField per
+    # timestep, and each retains ~9 full 3-D fields, so a whole season at
+    # 6-hourly resolution would need well over 100 GiB at once. The quantities
+    # kept afterwards are all 2-D and cost about 1 MiB per timestep, so
+    # batching bounds the peak without changing any result: every timestep is
+    # still processed independently, exactly as before.
+    n_time = gridfilled_dataset[time_coord_name].size
+    batches = []
+    for start in range(0, n_time, TIME_BATCH_SIZE):
+        stop = min(start + TIME_BATCH_SIZE, n_time)
+        print(f"  computing timesteps {start}-{stop - 1} of {n_time}")
+        batches.append(compute_batch(
+            gridfilled_dataset.isel({time_coord_name: slice(start, stop)}),
+            dz=dz, kmax=kmax, on_even_grid=on_even_grid))
+
+    output_dataset = batches[0] if len(batches) == 1 \
+        else xr.concat(batches, dim=time_coord_name)
+    gridfilled_dataset.close()
     return output_dataset
 
 
 def calculate_covariance(lwa_baro, u_baro):
     """
-    Calculate covariance.
+    Calculate the temporal covariance of LWA and U at each grid point.
+
     Args:
-        lwa_baro: dataset.lwa_baro
-        u_baro: dataset.u_baro
+        lwa_baro: dataset.lwa_baro, dimension (time, lat, lon)
+        u_baro: dataset.u_baro, dimension (time, lat, lon)
     Returns:
         cov_map in dimension of (lat, lon)
+
+    Note:
+        This used to call np.cov(m, y, rowvar=False), which treats every grid
+        point as a separate variable and so builds a (2N, 2N) matrix before
+        np.diagonal throws almost all of it away. On a 181x360 grid that is
+        130320^2 float64 = 127 GiB allocated to keep 0.5 MiB. The elementwise
+        form below gives the same numbers -- Bessel-corrected, matching
+        np.cov's default ddof=1 -- in O(N*T).
     """
-    baro_matrix_shape = lwa_baro.data.shape
-    flatten_lwa_baro = lwa_baro.data.reshape(baro_matrix_shape[0], baro_matrix_shape[1] * baro_matrix_shape[2])
-    flatten_u_baro = u_baro.data.reshape(baro_matrix_shape[0], baro_matrix_shape[1] * baro_matrix_shape[2])
-    covv = np.cov(m=flatten_lwa_baro, y=flatten_u_baro, rowvar=False)
-    row_cov = np.diagonal(covv, offset=baro_matrix_shape[1] * baro_matrix_shape[2])
-    cov_map = row_cov.reshape(baro_matrix_shape[1], baro_matrix_shape[2])
+    a = np.asarray(lwa_baro.data)
+    b = np.asarray(u_baro.data)
+    n_time = a.shape[0]
+    if n_time < 2:
+        raise ValueError(
+            f"covariance needs at least 2 timesteps, got {n_time}")
+    a_anomaly = a - a.mean(axis=0)
+    b_anomaly = b - b.mean(axis=0)
+    cov_map = (a_anomaly * b_anomaly).sum(axis=0) / (n_time - 1)
     return cov_map
 
 
@@ -199,7 +292,7 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
 
     cmap = "jet"
 
-    height_lat_plotter = HeightLatPlotter(figsize=(4, 4), title_str=title_str, xgrid=original_grid['lat'],
+    height_lat_plotter = HeightLatPlotter(figsize=(4, 4), title_str=title_str, xgrid=original_grid[lat_name],
                                           ygrid=analysis_height_array, cmap=cmap, xlim=[-80, 80])
     height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_u, cmap=cmap,
                                               var_title_str='zonal mean U',
@@ -211,12 +304,12 @@ def plot_and_save_figure(seasonal_average_data, analysis_height_array, plot_dir,
                                               var_title_str='zonal mean Uref',
                                               save_path=f"{plot_dir}{season}_zonal_mean_uref.eps", num_level=30)
     height_lat_plotter.plot_and_save_variable(variable=seasonal_average_data.zonal_mean_u - seasonal_average_data.uref,
-                                              cmap=cmap, var_title_str='zonal mean $\Delta$ U',
+                                              cmap=cmap, var_title_str=r'zonal mean $\Delta$ U',
                                               save_path=f"{plot_dir}{season}_zonal_mean_delta_u.eps", num_level=30)
 
     # Use encapsulated class to plot
-    lat_lon_plotter = LatLonMapPlotter(figsize=(6, 3), title_str=title_str, xgrid=original_grid['lon'],
-                                       ygrid=original_grid['lat'], cmap=cmap, xland=xland, yland=yland,
+    lat_lon_plotter = LatLonMapPlotter(figsize=(6, 3), title_str=title_str, xgrid=original_grid[lon_name],
+                                       ygrid=original_grid[lat_name], cmap=cmap, xland=xland, yland=yland,
                                        lon_range=lon_range, lat_range=lat_range)
     lat_lon_plotter.plot_and_save_variable(variable=seasonal_average_data.u_baro, cmap=cmap, var_title_str='U baro',
                                            save_path=f"{plot_dir}{season}_u_baro.eps", num_level=30)
@@ -250,11 +343,24 @@ for season, selected_months in season_to_months:
 
     plot_dir = f"{wk_dir}/{model_or_obs}/PS/"
 
-    # Do temporal sampling to reduce the data size
-    print("Start samping data in frequency 'day'.")
+    # Select the season. Every timestep in it is used -- at 6-hourly input that
+    # is all four samples a day.
+    #
+    # This previously ended in .groupby("time.day").first(). time.day is the
+    # day of the *month*, so grouping a multi-month, multi-year season by it
+    # collapsed to at most 31 samples, all drawn from whichever month came
+    # first: on a two-year record, "DJF" was 720 timesteps reduced to 31, every
+    # one of them 03:00 in January of year one. It also replaced the time
+    # dimension with a day dimension. Both are gone.
+    #
+    # LWA is a nonlinear functional of the instantaneous field, so the average
+    # of the diagnostic is not the diagnostic of the average. Keeping every
+    # timestep and averaging the results afterwards is the faithful order, and
+    # it is what the h7i (instantaneous) input was chosen for.
     sampled_dataset = model_dataset.where(
-        model_dataset.time.dt.month.isin(selected_months), drop=True) \
-        .groupby("time.day").first(skipna=False)
+        model_dataset[time_coord_name].dt.month.isin(selected_months), drop=True)
+    print(f"{season}: {sampled_dataset[time_coord_name].size} timesteps selected "
+          f"(all samples in the season, no temporal subsampling)")
     preprocessed_output_path = intermediate_output_paths[season]  # TODO set it
     print(f"Start preparing intermediate data in the directory: {preprocessed_output_path}")
     data_preprocessor.output_preprocess_data(

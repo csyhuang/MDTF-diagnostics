@@ -122,6 +122,53 @@ def convert_hPa_to_pseudoheight(p_array):
     return height_array
 
 
+def infer_vertical_grid(plev_hPa, default_dz=1000.0, tol=1.0):
+    """Decide whether the input already sits on an evenly spaced pseudoheight grid.
+
+    falwa's analysis grid is uniform in pseudoheight, z = -H ln(p/P_GROUND).
+    When the input pressure levels already form such a grid, `QGField` can take
+    them as they are and skip the vertical interpolation entirely -- pass
+    ``data_on_evenly_spaced_pseudoheight_grid=True`` and it derives ``dz`` and
+    ``kmax`` from the data itself. Skipping that step avoids resampling fields
+    that are already where they need to be, which would otherwise smooth the
+    profile for no reason.
+
+    Two conditions must hold, both checked here:
+
+    1. The levels are equally spaced in pseudoheight, to within *tol* metres.
+    2. The lowest level is the ground, z = 0 (p = P_GROUND = 1000 hPa). falwa's
+       own grid starts there, and parts of the reference-state solver assume a
+       column beginning at zero, so a uniform grid that starts elsewhere is not
+       interchangeable with it.
+
+    Args:
+        plev_hPa: pressure levels in hPa, ordered from high to low pressure.
+        default_dz: pseudoheight spacing to request when interpolation is needed.
+        tol: tolerance in metres for calling the spacing uniform.
+
+    Returns:
+        (data_on_evenly_spaced_pseudoheight_grid, dz, kmax)
+    """
+    height = convert_hPa_to_pseudoheight(np.asarray(plev_hPa, dtype=float))
+
+    hmax = float(np.nanmax(height))
+    fallback = (False, default_dz, int(hmax // default_dz) + 1)
+
+    if height.size < 3:
+        return fallback
+    # falwa needs ascending pseudoheight, i.e. descending pressure. Anything
+    # else is not a candidate for the pass-through branch.
+    spacing = np.diff(height)
+    if np.any(spacing <= 0):
+        return fallback
+
+    uniform = float(np.max(np.abs(spacing - spacing[0]))) <= tol
+    starts_at_ground = abs(float(height[0])) <= tol
+    if uniform and starts_at_ground:
+        return True, float(spacing[0]), int(height.size)
+    return fallback
+
+
 class DataPreprocessor:
     def __init__(
             self, wk_dir, xlon, ylat, u_var_name, v_var_name, t_var_name, plev_name, lat_name, lon_name, time_coord_name):

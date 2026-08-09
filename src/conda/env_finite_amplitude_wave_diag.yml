@@ -14,6 +14,20 @@ dependencies:
 - dask
 - gridfill
 - bottleneck
+# Reading the framework hand-off: case_info.yml (pyyaml) and the postprocessed
+# data catalog it names (intake-esm). See doc/sphinx/ref_envvars.rst.
+- pyyaml
+- intake-esm
+# falwa ships as a source distribution only: its F2PY extension modules are
+# built by Meson against the host machine, so there are no wheels to fall back
+# on. pip supplies the Python build backend (meson-python, ninja) itself via
+# PEP 517, but it cannot supply a Fortran compiler -- that has to come from
+# conda, hence fortran-compiler here. Without it the pip step below fails at
+# build time with a missing-compiler error.
+- fortran-compiler
 - pip
 - pip:
-   - falwa==1.2.1
+   # 2.3.3 is the current release. The driver passes
+   # data_on_evenly_spaced_pseudoheight_grid to QGFieldNH18, which is new in
+   # falwa 1.3, so the previous 1.2.1 pin would raise TypeError.
+   - falwa==2.3.3
