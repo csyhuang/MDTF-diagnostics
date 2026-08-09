@@ -122,6 +122,47 @@ def convert_hPa_to_pseudoheight(p_array):
     return height_array
 
 
+def save_seasonal_diagnostics(seasonal_average_data, analysis_height_array,
+                              lat_coord, lon_coord, output_path):
+    """Write the seasonal-mean diagnostics to netCDF.
+
+    The POD's primary product is figures, but the numbers behind them are worth
+    keeping: they are what a user would reanalyse, and what lets two
+    implementations be compared quantitatively rather than by eyeballing plots.
+
+    Args:
+        seasonal_average_data: namedtuple with the six seasonal-mean fields.
+        analysis_height_array: pseudoheight coordinate, metres.
+        lat_coord, lon_coord: coordinates of the grid the fields sit on.
+        output_path: destination .nc path.
+    """
+    height = np.asarray(analysis_height_array)
+    lat = np.asarray(lat_coord)
+    lon = np.asarray(lon_coord)
+
+    def _values(field):
+        return np.asarray(getattr(field, "values", field))
+
+    dataset = xr.Dataset(
+        data_vars={
+            "zonal_mean_u": (("height", "lat"), _values(seasonal_average_data.zonal_mean_u)),
+            "uref": (("height", "lat"), _values(seasonal_average_data.uref)),
+            "zonal_mean_lwa": (("height", "lat"), _values(seasonal_average_data.zonal_mean_lwa)),
+            "lwa_baro": (("lat", "lon"), _values(seasonal_average_data.lwa_baro)),
+            "u_baro": (("lat", "lon"), _values(seasonal_average_data.u_baro)),
+            "covariance_lwa_u_baro": (
+                ("lat", "lon"), _values(seasonal_average_data.covariance_lwa_u_baro)),
+        },
+        coords={"height": height, "lat": lat, "lon": lon})
+    dataset["height"].attrs.update(units="m", long_name="pseudoheight")
+    dataset["zonal_mean_u"].attrs.update(units="m s-1")
+    dataset["uref"].attrs.update(units="m s-1", long_name="reference state zonal wind")
+    dataset["zonal_mean_lwa"].attrs.update(units="m s-1", long_name="local wave activity")
+    dataset.to_netcdf(output_path)
+    dataset.close()
+    print(f"Saved seasonal diagnostics to {output_path}")
+
+
 def infer_vertical_grid(plev_hPa, default_dz=1000.0, tol=1.0):
     """Decide whether the input already sits on an evenly spaced pseudoheight grid.
 
@@ -256,7 +297,19 @@ class DataPreprocessor:
                 *[dataset[var_name]],
                 input_core_dims=((self._lat_name, self._lon_name),),
                 output_core_dims=((self._lat_name, self._lon_name),),
-                vectorize=True, dask="allowed")
+                # dask="parallelized", NOT "allowed". With "allowed" the dask
+                # array is handed straight to np.vectorize, which does not
+                # iterate it correctly once there is a loop dimension over
+                # (time, plev): the solver silently returns wrong values --
+                # ~15 m/s errors on a synthetic test, and the largest
+                # discrepancies at the level with the most missing data, which
+                # is the 1000 hPa level where nearly half the grid is below
+                # ground. Input from the framework is always dask-backed
+                # (intake's to_dataset_dict), so this path was always taken.
+                # "parallelized" reproduces the numpy result exactly, and
+                # raises rather than guessing if lat/lon are ever chunked.
+                vectorize=True, dask="parallelized",
+                output_dtypes=[dataset[var_name].dtype])
             field_at_all_level.to_netcdf(gridfill_file_path.format(var=var_name))
             field_at_all_level.close()
             print(f"Finished outputing {var_name} to {gridfill_file_path.format(var=var_name)}")

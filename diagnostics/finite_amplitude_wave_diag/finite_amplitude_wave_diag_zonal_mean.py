@@ -28,8 +28,8 @@ import os
 import gc
 from collections import namedtuple
 import matplotlib
-from finite_amplitude_wave_diag_utils import infer_vertical_grid, DataPreprocessor, LatLonMapPlotter, \
-    HeightLatPlotter
+from finite_amplitude_wave_diag_utils import infer_vertical_grid, save_seasonal_diagnostics, \
+    DataPreprocessor, LatLonMapPlotter, HeightLatPlotter
 
 # Commands to load third-party libraries. Any code you don't include that's
 # not part of your language's standard library should be listed in the
@@ -399,6 +399,12 @@ for season, selected_months in season_to_months:
     # we don't want to repeat ourselves.
 
     # set an informative title using info about the analysis set in env vars
+    save_seasonal_diagnostics(
+        seasonal_average_data=seasonal_avg_data,
+        analysis_height_array=analysis_height_array,
+        lat_coord=original_grid[lat_name], lon_coord=original_grid[lon_name],
+        output_path=f"{wk_dir}/{model_or_obs}/netCDF/diagnostics_{season}.nc")
+
     title_string = f"{casename} ({firstyr}-{lastyr}) {season}"
     # Plot the model data:
     plot_and_save_figure(
