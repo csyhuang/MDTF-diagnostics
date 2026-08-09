@@ -359,8 +359,18 @@ for season, selected_months in season_to_months:
     # it is what the h7i (instantaneous) input was chosen for.
     sampled_dataset = model_dataset.where(
         model_dataset[time_coord_name].dt.month.isin(selected_months), drop=True)
-    print(f"{season}: {sampled_dataset[time_coord_name].size} timesteps selected "
+    n_selected = sampled_dataset[time_coord_name].size
+    print(f"{season}: {n_selected} timesteps selected "
           f"(all samples in the season, no temporal subsampling)")
+
+    # A record shorter than a year leaves some seasons empty. Skip them with a
+    # warning rather than failing: partial-year input is a legitimate thing to
+    # hand a POD, and the covariance needs at least two timesteps anyway.
+    if n_selected < 2:
+        print(f"WARNING: {season} has {n_selected} timestep(s) in "
+              f"{firstyr}-{lastyr}; skipping this season.")
+        sampled_dataset.close()
+        continue
     preprocessed_output_path = intermediate_output_paths[season]  # TODO set it
     print(f"Start preparing intermediate data in the directory: {preprocessed_output_path}")
     data_preprocessor.output_preprocess_data(
